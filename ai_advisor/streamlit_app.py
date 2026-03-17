@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import streamlit as st
+import streamlit.components.v1 as components
 from ai_advisor.run_advisor import run_initial_pipeline, run_followup, AdvisorResult
 
 # ── Page Config ─────────────────────────────────────────────────────────────
@@ -593,10 +594,26 @@ def main():
         q = QUESTIONS[st.session_state.step]
 
         if q["type"] == "options":
-            for i, option in enumerate(q["options"]):
-                if st.button(option, key=f"opt_{st.session_state.step}_{i}", use_container_width=True):
-                    record_answer(option)
-                    st.rerun()
+            with st.chat_message("assistant"):
+                for i, option in enumerate(q["options"]):
+                    if st.button(option, key=f"opt_{st.session_state.step}_{i}", use_container_width=True):
+                        record_answer(option)
+                        st.rerun()
+            components.html("""
+                <script>
+                    function scrollToBottom() {
+                        var doc = window.parent.document;
+                        var el = doc.querySelector('section[data-testid="stMain"]')
+                                || doc.querySelector('section.main')
+                                || doc.querySelector('.main');
+                        if (el) el.scrollTop = el.scrollHeight;
+                    }
+                    scrollToBottom();
+                    setTimeout(scrollToBottom, 100);
+                    setTimeout(scrollToBottom, 300);
+                    setTimeout(scrollToBottom, 600);
+                </script>
+            """, height=1)
 
         else:
             # Free text input via chat input
