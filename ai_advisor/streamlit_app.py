@@ -1204,7 +1204,6 @@ def main():
                 if params:
                     _render_charts(params)
             elif msg.get("is_html"):
-            if msg.get("is_html"):
                 st.markdown(msg["content"], unsafe_allow_html=True)
             elif msg["role"] == "assistant" and msg.get("animated", False):
                 st.write_stream(typing_generator(msg["content"]))
