@@ -838,8 +838,8 @@ def _make_monte_carlo(
         plot_bgcolor="rgba(0,0,0,0)",
         xaxis=dict(gridcolor="rgba(200,200,200,0.2)"),
         yaxis=dict(gridcolor="rgba(200,200,200,0.2)"),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        margin=dict(l=10, r=10, t=60, b=10),
+        legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5),
+        margin=dict(l=10, r=10, t=60, b=60),
     )
     return fig
 
