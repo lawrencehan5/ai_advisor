@@ -17,7 +17,7 @@ APPROVED_STOCKS = [
     {"ticker": "COST", "name": "Costco Wholesale Corp."},
     {"ticker": "RKLB", "name": "Rocket Lab Corp."},
     {"ticker": "OPEN", "name": "Opendoor Technologies Inc."},
-    {"ticker": "BRK.B", "name": "Berkshire Hathaway Inc."},
+    {"ticker": "BRK-B", "name": "Berkshire Hathaway Inc."},
     {"ticker": "UNH", "name": "UnitedHealth Group Inc."},
     {"ticker": "HD", "name": "Home Depot Inc."},
     {"ticker": "NVDA", "name": "NVIDIA Corp."},
