@@ -11,8 +11,8 @@ Install: pip install yfinance
 import json
 import re
 import time
-import streamlit as st
 from datetime import datetime, timedelta
+import streamlit as st
 
 from openai import OpenAI
 from ai_advisor.stocks import APPROVED_STOCKS, APPROVED_ETFS, get_all_tickers
@@ -96,11 +96,20 @@ def fetch_stock_data(tickers: list[str] | None = None) -> dict[str, dict]:
                 change_1m = pct_change(21)
                 change_3m = pct_change(63) if len(close) >= 64 else None
 
-                # Get info
-                info = ticker_objs[ticker].info
+                # Get info with retry on rate limit
+                info = {}
+                for attempt in range(3):
+                    try:
+                        info = ticker_objs[ticker].info
+                        break
+                    except Exception as e:
+                        if "Too Many Requests" in str(e) or "Rate" in str(e):
+                            time.sleep(2 ** attempt * 2)  # 2s, 4s, 8s backoff
+                        else:
+                            raise
 
                 # Prevent yfinance rate limiting
-                time.sleep(0.3)
+                time.sleep(0.5)
 
                 # Format market cap
                 mc = info.get("marketCap", 0)
