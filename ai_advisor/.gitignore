@@ -29,4 +29,6 @@ Thumbs.db
 .idea/
 
 # CrewAI / project outputs
-portfolio_recommendation.md
+./portfolio_recommendation.md
+
+./src/ai_advisor/__pycache__

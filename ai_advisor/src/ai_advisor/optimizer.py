@@ -4,6 +4,9 @@ ai_advisor/optimizer.py
 Portfolio optimization using cvxpy (QP/LP strategies) and scipy (ERC).
 The AI agents pick a strategy → this module fetches price data, computes
 inputs, runs the optimizer, and returns structured results.
+Portfolio optimization using cvxpy (QP/LP strategies) and scipy (ERC).
+The AI agents pick a strategy → this module fetches price data, computes
+inputs, runs the optimizer, and returns structured results.
 """
 
 from dataclasses import dataclass, field
@@ -89,6 +92,17 @@ class OptimizationResult:
 
 
 # ── Strategy Selection ──────────────────────────────────────────────────────
+
+def select_strategy(risk_category: str, user_preference: str = "") -> str:
+    """
+    Given the AI's risk category (and optional user preference),
+    return the optimizer strategy key to use.
+    """
+    if user_preference:
+        pref_lower = user_preference.lower().replace(" ", "_").replace("-", "_")
+        for key in STRATEGIES:
+            if pref_lower in key or key in pref_lower:
+                return key
 
 def select_strategy(
     risk_category: str,
@@ -513,6 +527,10 @@ def run_optimization(
         strategy_display_name=STRATEGIES[strategy]["display_name"],
         success=True,
         allocations=allocations,
+        expected_return=exp_ret,
+        expected_volatility=exp_vol,
+        sharpe_ratio=sharpe,
+        metadata={"risk_free_rate": opt.rf, "n_assets": len(final_tickers)},
         expected_return=exp_ret,
         expected_volatility=exp_vol,
         sharpe_ratio=sharpe,
