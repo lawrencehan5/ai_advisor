@@ -93,17 +93,6 @@ class OptimizationResult:
 
 # ── Strategy Selection ──────────────────────────────────────────────────────
 
-def select_strategy(risk_category: str, user_preference: str = "") -> str:
-    """
-    Given the AI's risk category (and optional user preference),
-    return the optimizer strategy key to use.
-    """
-    if user_preference:
-        pref_lower = user_preference.lower().replace(" ", "_").replace("-", "_")
-        for key in STRATEGIES:
-            if pref_lower in key or key in pref_lower:
-                return key
-
 def select_strategy(
     risk_category: str,
     agent_strategy: str = "",
@@ -139,6 +128,41 @@ def select_strategy(
     # Step 2: score candidates from the risk category
     category = risk_category.upper()
     candidates = RISK_TO_STRATEGIES.get(category, ["max_sharpe_ratio"])
+    scores: dict[str, float] = {c: 0.0 for c in candidates}
+
+    def adj(s: str, d: float):
+        if s in scores:
+            scores[s] += d
+
+    # Passive/active style signals
+    if style_lower == "passive":
+        adj("market_tracking", +3); adj("equally_weighted", +1)
+        adj("max_expected_return", -2); adj("leveraged_max_sharpe", -3)
+    elif style_lower == "active":
+        adj("max_expected_return", +2); adj("max_sharpe_ratio", +2)
+        adj("leveraged_max_sharpe", +1); adj("market_tracking", -2)
+
+    # Experience gates
+    if exp_lower in ("none", "beginner"):
+        adj("leveraged_max_sharpe", -5); adj("max_expected_return", -2)
+        adj("minimum_variance", +2); adj("equally_weighted", +2); adj("market_tracking", +1)
+
+    # Horizon gates
+    if horizon_lower in ("<1yr", "1-3yr"):
+        adj("minimum_variance", +2); adj("leveraged_max_sharpe", -5); adj("max_expected_return", -1)
+    elif horizon_lower == "20+yr":
+        adj("max_expected_return", +1)
+        if leverage_ok:
+            adj("leveraged_max_sharpe", +1)
+
+    # Leverage hard gate
+    if leverage_comfort.lower() == "no":
+        adj("leveraged_max_sharpe", -10)
+    elif leverage_comfort.lower() == "yes":
+        adj("leveraged_max_sharpe", +2)
+
+    # Prefer earlier in list on ties (preserves existing priority for neutral profiles)
+    return max(candidates, key=lambda c: (scores[c], -candidates.index(c)))
     scores: dict[str, float] = {c: 0.0 for c in candidates}
 
     def adj(s: str, d: float):
