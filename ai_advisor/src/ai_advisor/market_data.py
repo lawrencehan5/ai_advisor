@@ -20,7 +20,7 @@ from ai_advisor.stocks import APPROVED_STOCKS, APPROVED_ETFS, get_all_tickers
 
 client = OpenAI()
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600, show_spinner=False)
 def fetch_stock_data(tickers: list[str] | None = None) -> dict[str, dict]:
     """
     Fetch current price, recent performance, and key metrics for each ticker.
