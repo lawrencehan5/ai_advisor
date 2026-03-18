@@ -9,10 +9,15 @@ dependencies = [
     "yfinance>=0.2",
     "plotly>=5.0",
 <<<<<<< HEAD
+<<<<<<< HEAD
     "scipy>=1.10",
     "cvxpy>=1.4",
 =======
 >>>>>>> 83b529a (Add plotly as a dependency in pyproject.toml)
+=======
+    "scipy>=1.10",
+    "cvxpy>=1.4",
+>>>>>>> cff96c3 (fix ModuleNotFoundError)
 ]
 
 [project.scripts]
