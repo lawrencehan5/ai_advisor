@@ -10,6 +10,9 @@ INTEGRATION INSTRUCTIONS:
 """
 
 from dataclasses import dataclass, field
+import pandas as pd
+import yfinance as yf
+from datetime import date, timedelta
 from ai_advisor.stocks import APPROVED_STOCKS, APPROVED_ETFS, get_all_tickers
 
 
@@ -148,6 +151,51 @@ def select_assets(risk_category: str) -> list[str]:
         return get_all_tickers()
 
 
+# ── Price Data Fetching ─────────────────────────────────────────────────────
+
+def fetch_price_data(tickers: list[str]) -> pd.DataFrame:
+    """
+    Download historical adjusted close prices for the given tickers.
+    Attempts 5 years first; falls back to 3 years if any ticker has
+    less than 3 years of data (e.g. recent IPOs).
+
+    Returns:
+        DataFrame of daily adjusted close prices, columns = tickers.
+        Tickers that fail entirely are dropped and a warning is printed.
+    """
+    end = date.today()
+    start_5y = end - timedelta(days=5 * 365)
+    start_3y = end - timedelta(days=3 * 365)
+
+    # Try 5-year window first
+    raw = yf.download(tickers, start=start_5y, end=end, auto_adjust=True, progress=False)["Close"]
+
+    # yfinance returns a Series (not DataFrame) when only 1 ticker
+    if isinstance(raw, pd.Series):
+        raw = raw.to_frame()
+
+    # Check which tickers have at least 3 years of non-NaN rows (~756 trading days)
+    min_rows = 3 * 252
+    sufficient = [col for col in raw.columns if raw[col].notna().sum() >= min_rows]
+    short_history = [col for col in raw.columns if col not in sufficient]
+
+    if short_history:
+        print(f"  [yfinance] {short_history} have < 3y data — retrying on 3y window")
+        raw_3y = yf.download(short_history, start=start_3y, end=end,
+                             auto_adjust=True, progress=False)["Close"]
+        if isinstance(raw_3y, pd.Series):
+            raw_3y = raw_3y.to_frame()
+        raw = raw[sufficient].join(raw_3y, how="outer")
+
+    # Drop tickers that are entirely NaN (delistings, bad symbols)
+    raw = raw.dropna(axis=1, how="all")
+    failed = [t for t in tickers if t not in raw.columns]
+    if failed:
+        print(f"  [yfinance] Could not fetch data for: {failed} — dropping from universe")
+
+    return raw
+
+
 # ── CPLEX Optimizer Interface ───────────────────────────────────────────────
 
 def run_optimization(
@@ -174,6 +222,12 @@ def run_optimization(
     Returns:
         OptimizationResult with weights, metrics, etc.
     """
+
+    # ── Fetch real price data ──────────────────────────────────────
+    prices = fetch_price_data(tickers)
+    tickers = list(prices.columns)
+    print(f"  [optimizer] Price data loaded: {len(tickers)} tickers, "
+          f"{len(prices)} trading days")
 
     # ─── PLACEHOLDER: Replace this with your actual CPLEX calls ───
     #
