@@ -10,6 +10,8 @@ Install: pip install yfinance
 
 import json
 import re
+import time
+import streamlit as st
 from datetime import datetime, timedelta
 
 from openai import OpenAI
@@ -18,7 +20,7 @@ from ai_advisor.stocks import APPROVED_STOCKS, APPROVED_ETFS, get_all_tickers
 
 client = OpenAI()
 
-
+@st.cache_data(ttl=3600)
 def fetch_stock_data(tickers: list[str] | None = None) -> dict[str, dict]:
     """
     Fetch current price, recent performance, and key metrics for each ticker.
@@ -96,6 +98,9 @@ def fetch_stock_data(tickers: list[str] | None = None) -> dict[str, dict]:
 
                 # Get info
                 info = ticker_objs[ticker].info
+
+                # Prevent yfinance rate limiting
+                time.sleep(0.3)
 
                 # Format market cap
                 mc = info.get("marketCap", 0)
