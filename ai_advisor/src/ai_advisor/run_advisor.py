@@ -431,14 +431,6 @@ def run_initial_pipeline(
         print(f"  Warning: Could not fetch market data: {e}")
         market_context = ""
 
-    # ── Phase 0b: Fetch real-time market data ───────────────────
-    progress("Fetching real-time stock prices and market news")
-    try:
-        market_context = get_market_context()
-    except Exception as e:
-        print(f"  Warning: Could not fetch market data: {e}")
-        market_context = ""
-
     # ── Phase 1: Survey analysis + risk assessment ──────────────
     progress("Building your financial profile")
     advisor = AiAdvisor()
