@@ -411,6 +411,28 @@ QUESTIONS = [
         ],
     },
     {
+        "key": "investment_style",
+        "message": "Do you prefer passive investing (tracking the market) or active investing (trying to beat it)?",
+        "type": "options",
+        "options": [
+            "Passive — I just want to match the market (e.g. index funds)",
+            "Slightly passive — prefer index funds but open to some active",
+            "No preference — either is fine",
+            "Slightly active — prefer trying to beat the market",
+            "Active — I want to maximize returns and beat the market",
+        ],
+    },
+    {
+        "key": "leverage_comfort",
+        "message": "Are you comfortable with leverage — using borrowed money to amplify returns (which also amplifies losses)?",
+        "type": "options",
+        "options": [
+            "No — I only want to invest what I have",
+            "Maybe — open to a small amount if strongly recommended",
+            "Yes — I'm comfortable with leverage",
+        ],
+    },
+    {
         "key": "special_considerations",
         "message": "Last question — anything else I should know? Any stock that you like or dislike? ESG preferences, upcoming big expenses, tax situations, constraints?",
         "type": "freetext",
@@ -439,6 +461,8 @@ SURVEY_LABELS = {
     "risk_comfort": "Reaction to 20% Portfolio Drop",
     "return_vs_safety": "Growth vs Safety Priority",
     "loss_tolerance": "Maximum Tolerable Annual Loss",
+    "investment_style": "Investment Style",
+    "leverage_comfort": "Leverage Comfort",
     "special_considerations": "Special Considerations",
 }
 
