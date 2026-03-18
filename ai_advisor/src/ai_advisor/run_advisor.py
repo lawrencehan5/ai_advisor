@@ -2,9 +2,9 @@
 ai_advisor/run_advisor.py
 
 Orchestrates the full pipeline:
-  1. LLM extraction    — GPT-4o extracts structured data from raw survey
+  1. LLM extraction    — GPT-4.1 extracts structured data from raw survey
   2. CrewAI agents     — survey analysis + risk assessment
-  3. LLM extraction    — GPT-4o extracts risk category/score/strategy from agent output
+  3. LLM extraction    — GPT-4.1 extracts risk category/score/strategy from agent output
   4. CPLEX optimizer   — portfolio optimization
   5. CrewAI agent      — present results
   6. Follow-up Q&A     — CrewAI agent built manually
@@ -33,7 +33,7 @@ from ai_advisor.optimizer import (
 # ── OpenAI client for structured extraction ─────────────────────────────────
 
 client = OpenAI()
-EXTRACTION_MODEL = "gpt-4o"
+EXTRACTION_MODEL = "gpt-4.1"
 
 
 # ── Structured Output ───────────────────────────────────────────────────────
@@ -58,7 +58,7 @@ class AdvisorResult:
 
 def _extract_survey_data(survey_text: str) -> dict:
     """
-    Use GPT-4o to extract structured data from raw survey responses.
+    Use GPT-4.1 to extract structured data from raw survey responses.
     Handles any input format: "$100k", "a hundred thousand", "100,000", etc.
     Returns a dict with: investment_amount, excluded_tickers, included_tickers
     """
@@ -115,7 +115,7 @@ def _extract_survey_data(survey_text: str) -> dict:
 
 def _extract_risk_data(risk_text: str, profile_text: str) -> dict:
     """
-    Use GPT-4o to extract risk category, score, and strategy from agent output.
+    Use GPT-4.1 to extract risk category, score, and strategy from agent output.
     """
     strategy_keys = list(STRATEGIES.keys())
 
@@ -173,7 +173,7 @@ def _select_tickers_with_ai(
     risk_text: str,
 ) -> list[str]:
     """
-    Use GPT-4o to pick which tickers to include in the portfolio,
+    Use GPT-4.1 to pick which tickers to include in the portfolio,
     based on risk category, user constraints, and the full profile.
     """
     all_tickers = get_all_tickers()
