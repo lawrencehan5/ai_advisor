@@ -7,6 +7,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import time
+import numpy as np
+import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
 from ai_advisor.run_advisor import run_initial_pipeline, run_followup, AdvisorResult
@@ -532,6 +534,124 @@ def format_survey_for_crew():
     return "\n".join(lines)
 
 
+_HORIZON_YEARS = {
+    "<1yr": 1, "1-3yr": 2, "3-5yr": 4,
+    "5-10yr": 7, "10-20yr": 15, "20+yr": 25,
+}
+
+
+def _make_pie_chart(allocations: list[dict]) -> go.Figure:
+    labels = [a["ticker"] for a in allocations]
+    values = [a["weight"] for a in allocations]
+    fig = go.Figure(go.Pie(
+        labels=labels, values=values,
+        hole=0.4,
+        textinfo="label+percent",
+        textfont_size=13,
+        marker=dict(colors=[
+            "#6366f1", "#8b5cf6", "#ec4899", "#f59e0b", "#10b981",
+            "#3b82f6", "#ef4444", "#14b8a6", "#f97316", "#a855f7",
+            "#06b6d4", "#84cc16", "#e11d48", "#0ea5e9", "#d97706",
+        ]),
+    ))
+    fig.update_layout(
+        title=dict(text="Portfolio Allocation", font=dict(size=16)),
+        margin=dict(l=10, r=10, t=50, b=10),
+        height=360,
+        paper_bgcolor="rgba(0,0,0,0)",
+        showlegend=False,
+    )
+    return fig
+
+
+def _make_monte_carlo(
+    expected_return: float,
+    expected_volatility: float,
+    investment_amount: float,
+    investment_horizon: str,
+    n_sims: int = 500,
+) -> go.Figure:
+    years = _HORIZON_YEARS.get(investment_horizon, 5)
+    n_steps = years * 12
+    dt = 1 / 12
+    mu, sigma = expected_return, expected_volatility
+
+    rng = np.random.default_rng(42)
+    paths = np.empty((n_sims, n_steps + 1))
+    paths[:, 0] = investment_amount
+    for t in range(1, n_steps + 1):
+        Z = rng.standard_normal(n_sims)
+        paths[:, t] = paths[:, t - 1] * np.exp(
+            (mu - 0.5 * sigma ** 2) * dt + sigma * np.sqrt(dt) * Z
+        )
+
+    times = np.linspace(0, years, n_steps + 1)
+    pct = {p: np.percentile(paths, p, axis=0) for p in (5, 25, 50, 75, 95)}
+
+    accent = "99, 102, 241"
+    fig = go.Figure()
+    # Outer band (5–95th)
+    fig.add_trace(go.Scatter(
+        x=np.concatenate([times, times[::-1]]),
+        y=np.concatenate([pct[95], pct[5][::-1]]),
+        fill="toself", fillcolor=f"rgba({accent},0.12)",
+        line=dict(color="rgba(0,0,0,0)"), name="5–95th %ile", hoverinfo="skip",
+    ))
+    # Inner band (25–75th)
+    fig.add_trace(go.Scatter(
+        x=np.concatenate([times, times[::-1]]),
+        y=np.concatenate([pct[75], pct[25][::-1]]),
+        fill="toself", fillcolor=f"rgba({accent},0.30)",
+        line=dict(color="rgba(0,0,0,0)"), name="25–75th %ile", hoverinfo="skip",
+    ))
+    # Median
+    fig.add_trace(go.Scatter(
+        x=times, y=pct[50],
+        line=dict(color=f"rgb({accent})", width=2.5), name="Median",
+    ))
+    # Starting value dotted line
+    fig.add_hline(
+        y=investment_amount, line_dash="dot",
+        line_color="gray", opacity=0.5,
+        annotation_text=f"  Initial ${investment_amount:,.0f}",
+        annotation_position="bottom right",
+    )
+
+    fig.update_layout(
+        title=dict(
+            text=f"Monte Carlo Simulation — {n_sims} paths over {years} yr",
+            font=dict(size=16),
+        ),
+        xaxis_title="Years",
+        yaxis_title="Portfolio Value ($)",
+        yaxis_tickformat="$,.0f",
+        height=400,
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        xaxis=dict(gridcolor="rgba(200,200,200,0.2)"),
+        yaxis=dict(gridcolor="rgba(200,200,200,0.2)"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        margin=dict(l=10, r=10, t=60, b=10),
+    )
+    return fig
+
+
+def _render_charts(params: dict):
+    col1, col2 = st.columns(2)
+    with col1:
+        st.plotly_chart(_make_pie_chart(params["allocations"]), use_container_width=True)
+    with col2:
+        st.plotly_chart(
+            _make_monte_carlo(
+                params["expected_return"],
+                params["expected_volatility"],
+                params["investment_amount"],
+                params["investment_horizon"],
+            ),
+            use_container_width=True,
+        )
+
+
 def build_portfolio_card(result: AdvisorResult) -> str:
     """Build HTML card for portfolio results displayed in chat."""
     opt = result.optimization_result
@@ -687,6 +807,11 @@ def main():
     # ── Render all chat messages ──
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
+            if msg.get("is_charts"):
+                params = st.session_state.get("chart_params")
+                if params:
+                    _render_charts(params)
+            elif msg.get("is_html"):
             if msg.get("is_html"):
                 st.markdown(msg["content"], unsafe_allow_html=True)
             elif msg["role"] == "assistant" and msg.get("animated", False):
@@ -752,6 +877,20 @@ def main():
             "is_html": True,
             "is_result": True,
             "animated": False,
+        })
+
+        # Store chart parameters and add charts sentinel message
+        opt = result.optimization_result
+        st.session_state.chart_params = {
+            "allocations": result.allocations,
+            "expected_return": opt.expected_return,
+            "expected_volatility": opt.expected_volatility,
+            "investment_amount": opt.metadata.get("investment_amount", 10000.0),
+            "investment_horizon": result.investment_horizon or "5-10yr",
+        }
+        st.session_state.messages.append({
+            "role": "assistant",
+            "is_charts": True,
         })
 
         # Text recommendation

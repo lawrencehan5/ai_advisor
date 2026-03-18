@@ -516,7 +516,7 @@ def run_optimization(
         expected_return=exp_ret,
         expected_volatility=exp_vol,
         sharpe_ratio=sharpe,
-        metadata={"risk_free_rate": opt.rf, "n_assets": len(final_tickers)},
+        metadata={"risk_free_rate": opt.rf, "n_assets": len(final_tickers), "investment_amount": investment_amount},
     )
 
 
