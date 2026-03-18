@@ -22,6 +22,7 @@ from crewai import Agent, Task, Crew, Process
 
 from ai_advisor.crew import AiAdvisor, DEFAULT_LLM
 from ai_advisor.stocks import get_approved_universe_text, get_all_tickers
+from ai_advisor.market_data import get_market_context
 from ai_advisor.optimizer import (
     select_strategy,
     run_optimization,
@@ -52,6 +53,7 @@ class AdvisorResult:
     allocations: list[dict] = field(default_factory=list)
     excluded_tickers: list[str] = field(default_factory=list)
     included_tickers: list[str] = field(default_factory=list)
+    market_context: str = ""
 
 
 # ── LLM Extraction (replaces all regex parsers) ────────────────────────────
@@ -171,46 +173,55 @@ def _select_tickers_with_ai(
     included_tickers: list[str],
     profile_text: str,
     risk_text: str,
+    market_context: str = "",
 ) -> list[str]:
     """
     Use GPT-4.1 to pick which tickers to include in the portfolio,
-    based on risk category, user constraints, and the full profile.
+    based on risk category, user constraints, the full profile,
+    AND real-time market data.
     """
     all_tickers = get_all_tickers()
+
+    system_prompt = (
+        "You are a portfolio construction expert. Select 8-15 tickers "
+        "from the approved universe for the user's portfolio.\n\n"
+        f"APPROVED TICKERS: {', '.join(all_tickers)}\n\n"
+        "Return ONLY a JSON array of ticker strings. No explanation, "
+        "no markdown, no backticks. Example: [\"VOO\",\"BND\",\"AAPL\"]\n\n"
+        "Rules:\n"
+        "- NEVER include tickers the user asked to exclude\n"
+        "- Always include tickers the user asked to include\n"
+        "- CONSERVATIVE: heavy bonds/fixed-income ETFs, defensive stocks\n"
+        "- MODERATE: mix of bonds and broad equity ETFs\n"
+        "- BALANCED: equal bonds and equities, some alternatives\n"
+        "- GROWTH: equity-heavy, growth stocks, less bonds\n"
+        "- AGGRESSIVE: mostly growth stocks and equity ETFs, minimal bonds\n"
+        "- Diversify across sectors\n"
+        "- USE the real-time market data below to inform your picks:\n"
+        "  - Favor stocks/ETFs with positive recent momentum where appropriate\n"
+        "  - Consider current valuations (P/E ratios)\n"
+        "  - Factor in current market conditions and sector trends\n"
+        "  - For conservative portfolios, favor stable/low-volatility picks\n"
+        "  - For growth portfolios, favor strong recent performers\n"
+    )
+
+    user_prompt = (
+        f"Risk Category: {risk_category}\n"
+        f"Excluded tickers: {excluded_tickers if excluded_tickers else 'none'}\n"
+        f"Must-include tickers: {included_tickers if included_tickers else 'none'}\n\n"
+        f"User Profile:\n{profile_text[:500]}\n\n"
+        f"Risk Assessment:\n{risk_text[:500]}\n\n"
+    )
+
+    if market_context:
+        user_prompt += f"--- REAL-TIME MARKET DATA ---\n{market_context}\n--- END MARKET DATA ---\n"
 
     response = client.chat.completions.create(
         model=EXTRACTION_MODEL,
         temperature=0,
         messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are a portfolio construction expert. Select 8-15 tickers "
-                    "from the approved universe for the user's portfolio.\n\n"
-                    f"APPROVED TICKERS: {', '.join(all_tickers)}\n\n"
-                    "Return ONLY a JSON array of ticker strings. No explanation, "
-                    "no markdown, no backticks. Example: [\"VOO\",\"BND\",\"AAPL\"]\n\n"
-                    "Rules:\n"
-                    "- NEVER include tickers the user asked to exclude\n"
-                    "- Always include tickers the user asked to include\n"
-                    "- CONSERVATIVE: heavy bonds/fixed-income ETFs, defensive stocks\n"
-                    "- MODERATE: mix of bonds and broad equity ETFs\n"
-                    "- BALANCED: equal bonds and equities, some alternatives\n"
-                    "- GROWTH: equity-heavy, growth stocks, less bonds\n"
-                    "- AGGRESSIVE: mostly growth stocks and equity ETFs, minimal bonds\n"
-                    "- Diversify across sectors"
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"Risk Category: {risk_category}\n"
-                    f"Excluded tickers: {excluded_tickers if excluded_tickers else 'none'}\n"
-                    f"Must-include tickers: {included_tickers if included_tickers else 'none'}\n\n"
-                    f"User Profile:\n{profile_text[:500]}\n\n"
-                    f"Risk Assessment:\n{risk_text[:500]}"
-                ),
-            },
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
         ],
     )
 
@@ -245,18 +256,25 @@ def _format_optimizer_allocations(opt_result: OptimizationResult) -> str:
 
 # ── Pipeline Runner ─────────────────────────────────────────────────────────
 
-def run_initial_pipeline(survey_responses: str) -> AdvisorResult:
+def run_initial_pipeline(
+    survey_responses: str,
+    on_progress: callable = None,
+) -> AdvisorResult:
     """
-    Full pipeline:
-      Phase 0 — LLM extraction: parse survey into structured data
-      Phase 1 — CrewAI agents: survey analysis + risk assessment
-      Phase 1b — LLM extraction: parse agent output into structured data
-      Phase 2 — Python: CPLEX optimization
-      Phase 3 — CrewAI agent: present results
+    Full pipeline with progress reporting.
+
+    Args:
+        survey_responses: Formatted survey text
+        on_progress: Optional callback(stage_label: str) called at each stage
     """
 
+    def progress(msg: str):
+        print(f"  {msg}")
+        if on_progress:
+            on_progress(msg)
+
     # ── Phase 0: Extract structured data from raw survey ────────
-    print("  Extracting structured data from survey...")
+    progress("Reading your survey responses")
     survey_data = _extract_survey_data(survey_responses)
     investment_amount = survey_data["investment_amount"]
     excluded_tickers = survey_data["excluded_tickers"]
@@ -265,7 +283,16 @@ def run_initial_pipeline(survey_responses: str) -> AdvisorResult:
     print(f"  Parsed: investment=${investment_amount:,.0f}, "
           f"exclude={excluded_tickers}, include={included_tickers}")
 
+    # ── Phase 0b: Fetch real-time market data ───────────────────
+    progress("Fetching real-time stock prices and market news")
+    try:
+        market_context = get_market_context()
+    except Exception as e:
+        print(f"  Warning: Could not fetch market data: {e}")
+        market_context = ""
+
     # ── Phase 1: Survey analysis + risk assessment ──────────────
+    progress("Building your financial profile")
     advisor = AiAdvisor()
     full_crew = advisor.crew()
 
@@ -299,7 +326,7 @@ def run_initial_pipeline(survey_responses: str) -> AdvisorResult:
     risk_text = str(analysis_crew.tasks[1].output) if analysis_crew.tasks[1].output else str(analysis_result)
 
     # ── Phase 1b: Extract risk data from agent output ───────────
-    print("  Extracting risk assessment data...")
+    progress("Assessing your risk tolerance")
     risk_data = _extract_risk_data(risk_text, profile_text)
 
     risk_category = risk_data["risk_category"]
@@ -311,13 +338,14 @@ def run_initial_pipeline(survey_responses: str) -> AdvisorResult:
         investment_amount = risk_data["investment_amount"]
 
     # ── Phase 2: AI selects tickers → run optimizer ───────────
-    print(f"\n  AI selecting tickers for portfolio...")
+    progress("Selecting stocks and ETFs using current market data")
     tickers = _select_tickers_with_ai(
         risk_category=risk_category,
         excluded_tickers=excluded_tickers,
         included_tickers=included_tickers,
         profile_text=profile_text,
         risk_text=risk_text,
+        market_context=market_context,
     )
 
     strategy = select_strategy(risk_category, optimizer_strategy)
@@ -330,9 +358,11 @@ def run_initial_pipeline(survey_responses: str) -> AdvisorResult:
         print(f"  Excluded: {', '.join(excluded_tickers)}")
     print()
 
+    progress(f"Optimizing portfolio weights ({strategy.replace('_', ' ')})")
     opt_result = run_optimization(strategy, tickers, investment_amount)
 
     # ── Phase 3: Present results with FULL context ──────────────
+    progress("Preparing your personalized recommendation")
     advisor2 = AiAdvisor()
     full_crew2 = advisor2.crew()
 
@@ -354,6 +384,8 @@ def run_initial_pipeline(survey_responses: str) -> AdvisorResult:
     alloc_text = _format_optimizer_allocations(opt_result)
     if constraint_lines:
         alloc_text += f"\n\n  User Constraints Applied:\n  " + "\n  ".join(constraint_lines)
+    if market_context:
+        alloc_text += f"\n\n{market_context}"
 
     presentation_inputs = {
         # Placeholders for tasks 1 & 2
@@ -388,6 +420,7 @@ def run_initial_pipeline(survey_responses: str) -> AdvisorResult:
         allocations=opt_result.allocations,
         excluded_tickers=excluded_tickers,
         included_tickers=included_tickers,
+        market_context=market_context,
     )
 
 
@@ -437,6 +470,9 @@ def run_followup(question: str, advisor_result: AdvisorResult) -> str:
 
     if advisor_result.excluded_tickers:
         context += f"Excluded tickers (user requested): {', '.join(advisor_result.excluded_tickers)}\n\n"
+
+    if advisor_result.market_context:
+        context += f"--- REAL-TIME MARKET DATA (from session start) ---\n{advisor_result.market_context}\n--- END MARKET DATA ---\n\n"
 
     context += (
         f"Available optimization strategies:\n"

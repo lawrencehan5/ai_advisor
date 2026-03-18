@@ -6,6 +6,7 @@ Run:  streamlit run streamlit_app.py
 from dotenv import load_dotenv
 load_dotenv()
 
+import time
 import streamlit as st
 import streamlit.components.v1 as components
 from ai_advisor.run_advisor import run_initial_pipeline, run_followup, AdvisorResult
@@ -36,6 +37,15 @@ st.markdown("""
 
     .stApp { font-family: 'DM Sans', sans-serif; }
     #MainMenu, header, footer, .stDeployButton { display: none !important; }
+
+    /* Remove default top padding so brand bar sits flush at the top */
+    .block-container { padding-top: 1rem !important; }
+
+    /* User avatar — green */
+    [data-testid="stChatMessageAvatarUser"] {
+        background-color: #22c55e !important;
+        color: #fff !important;
+    }
 
     /* Brand */
     .brand-bar {
@@ -70,6 +80,9 @@ st.markdown("""
         width: fit-content !important;
         max-width: 100% !important;
     }
+    [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) {
+        background: transparent !important;
+    }
 
     /* Compact stacked buttons (survey options) */
     [data-testid="stVerticalBlock"] > [data-testid="stVerticalBlock"] {
@@ -96,6 +109,22 @@ st.markdown("""
         text-align: center !important;
         padding: 0.6rem 2rem !important;
         font-size: 0.9rem !important;
+    }
+
+    /* ── Gold chat input bar ── */
+    [data-testid="stChatInput"] > div {
+        border-color: var(--accent-gold) !important;
+        box-shadow: 0 0 0 1px var(--accent-gold) !important;
+    }
+    [data-testid="stChatInput"] > div:focus-within {
+        border-color: var(--accent-gold) !important;
+        box-shadow: 0 0 0 2px rgba(201,162,78,0.45) !important;
+    }
+    [data-testid="stChatInputTextArea"] {
+        caret-color: var(--accent-gold) !important;
+    }
+    [data-testid="stChatInputSubmitButton"] button {
+        color: var(--accent-gold) !important;
     }
 
     /* Portfolio card inside chat */
@@ -179,6 +208,32 @@ st.markdown("""
         font-size: 1rem; color: var(--text-secondary);
         line-height: 1.6; max-width: 460px; margin: 0 auto 2rem auto;
     }
+
+    /* ── Pipeline status stages ── */
+    .pipeline-stage {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.7rem;
+        color: var(--text-muted);
+        padding: 0.15rem 0;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    .pipeline-dot {
+        width: 5px; height: 5px;
+        border-radius: 50%;
+        flex-shrink: 0;
+    }
+    .pipeline-dot.done { background: var(--accent-gold); }
+    .pipeline-dot.active {
+        background: var(--text-muted);
+        animation: pulse-stage 1s ease-in-out infinite;
+    }
+    @keyframes pulse-stage {
+        0%, 100% { opacity: 0.3; transform: scale(0.8); }
+        50% { opacity: 1; transform: scale(1.3); }
+    }
+    .pipeline-block { padding: 0.4rem 0; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -397,8 +452,49 @@ def brand():
     )
 
 
-def add_assistant(text):
-    st.session_state.messages.append({"role": "assistant", "content": text})
+def autofocus_input():
+    """Inject JS to focus the chat input textarea after it renders."""
+    components.html("""
+        <script>
+            (function() {
+                var doc = window.parent.document;
+                function focus() {
+                    var el = doc.querySelector('textarea[data-testid="stChatInputTextArea"]');
+                    if (el) { el.focus(); return true; }
+                    return false;
+                }
+                if (!focus()) {
+                    var t = setInterval(function() { if (focus()) clearInterval(t); }, 50);
+                    setTimeout(function() { clearInterval(t); }, 1500);
+                }
+            })();
+        </script>
+    """, height=0)
+
+
+def typing_generator(text: str):
+    """
+    Yield text in small chunks to simulate a typing effect.
+    Speed is adaptive: total animation time is capped at ~1.5 s so short
+    questions feel snappy and long responses don't drag on forever.
+    """
+    chunk_size = 3
+    chunks = max(len(text) // chunk_size, 1)
+    delay = min(0.025, max(0.008, 1.5 / chunks))
+
+    for i in range(0, len(text), chunk_size):
+        yield text[i : i + chunk_size]
+        time.sleep(delay)
+
+
+def add_assistant(text: str, animated: bool = True):
+    """Append an assistant message. `animated=True` means it will be
+    streamed character-by-character the first time it is rendered."""
+    st.session_state.messages.append({
+        "role": "assistant",
+        "content": text,
+        "animated": animated,
+    })
 
 
 def add_user(text):
@@ -416,7 +512,6 @@ def build_portfolio_card(result: AdvisorResult) -> str:
     """Build HTML card for portfolio results displayed in chat."""
     opt = result.optimization_result
 
-    # Metrics row
     metrics = f"""
     <div class="portfolio-card">
         <h3>Portfolio Overview</h3>
@@ -444,7 +539,6 @@ def build_portfolio_card(result: AdvisorResult) -> str:
         </div>
     """
 
-    # Allocation rows with bars
     max_w = max((a["weight"] for a in result.allocations), default=1)
     rows = ""
     for a in result.allocations:
@@ -461,6 +555,27 @@ def build_portfolio_card(result: AdvisorResult) -> str:
 
     metrics += f'<div class="alloc-table">{rows}</div></div>'
     return metrics
+
+
+def build_stages_html(completed: list[str], active: str = None) -> str:
+    """Build the HTML for pipeline status stages."""
+    html = '<div class="pipeline-block">'
+    for stage in completed:
+        html += (
+            f'<div class="pipeline-stage">'
+            f'<span class="pipeline-dot done"></span>'
+            f'{stage}'
+            f'</div>'
+        )
+    if active:
+        html += (
+            f'<div class="pipeline-stage">'
+            f'<span class="pipeline-dot active"></span>'
+            f'{active}'
+            f'</div>'
+        )
+    html += '</div>'
+    return html
 
 
 def advance_to_next_question():
@@ -494,9 +609,7 @@ def reset():
 
 def build_followup_context(current: str) -> str:
     """Pack prior follow-up conversation for agent memory."""
-    # Find messages after the portfolio recommendation
     msgs = st.session_state.messages
-    # Find the index of the portfolio card message
     start = 0
     for i, m in enumerate(msgs):
         if m.get("is_result"):
@@ -520,49 +633,87 @@ def build_followup_context(current: str) -> str:
 def main():
     brand()
 
-    # ── Welcome state: show greeting ──
+    # ── Welcome state ──
     if st.session_state.phase == "welcome":
-        st.markdown("")
-        st.markdown(
-            '<div class="start-section">'
-            "<h1>Your Portfolio, Optimized.</h1>"
-            "<p>I'll ask you a few questions about your financial situation, "
-            "goals, and risk tolerance, then build a personalized, "
-            "quantitatively optimized portfolio for you.</p>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
-        _, col_c, _ = st.columns([1, 1, 1])
-        with col_c:
-            if st.button("Let's get started →", use_container_width=True, type="primary"):
-                st.session_state.phase = "survey"
-                st.session_state.step = 0
-                add_assistant("Great, let's build your portfolio. I'll walk you through a few questions — it should take about 3–5 minutes.")
-                advance_to_next_question()
-                st.rerun()
+        welcome = st.empty()
+        with welcome.container():
+            st.markdown("")
+            st.markdown(
+                '<div class="start-section">'
+                "<h1>Your Portfolio, Optimized.</h1>"
+                "<p>I'll ask you a few questions about your financial situation, "
+                "goals, and risk tolerance, then build a personalized, "
+                "quantitatively optimized portfolio for you.</p>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+            _, col_c, _ = st.columns([1, 1, 1])
+            with col_c:
+                clicked = st.button("Let's get started →", use_container_width=True, type="primary")
+
+        if clicked:
+            welcome.empty()
+            st.session_state.phase = "survey"
+            st.session_state.step = 0
+            add_assistant("Great, let's build your portfolio. I'll walk you through a few questions — it should take about 3–5 minutes.")
+            advance_to_next_question()
+            st.rerun()
         return
 
     # ── Render all chat messages ──
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
-            # Check if this is a result card (HTML)
             if msg.get("is_html"):
                 st.markdown(msg["content"], unsafe_allow_html=True)
+            elif msg["role"] == "assistant" and msg.get("animated", False):
+                st.write_stream(typing_generator(msg["content"]))
+                msg["animated"] = False
             else:
                 st.markdown(msg["content"])
 
-    # ── Processing phase ──
+    # ── Processing phase with live status ──
     if st.session_state.phase == "processing":
-        with st.chat_message("assistant"):
-            with st.spinner("Analyzing your profile and running portfolio optimization — this will take a moment..."):
-                try:
-                    survey_text = format_survey_for_crew()
-                    result = run_initial_pipeline(survey_text)
-                    st.session_state.advisor_result = result
-                    st.session_state.error = None
-                except Exception as e:
-                    st.session_state.error = str(e)
-                    result = None
+        status_container = st.empty()
+        completed_stages = []
+        current_stage = [None]
+
+        def on_progress(stage_label: str):
+            if current_stage[0]:
+                completed_stages.append(current_stage[0])
+            current_stage[0] = stage_label
+            status_container.markdown(
+                build_stages_html(completed_stages, current_stage[0]),
+                unsafe_allow_html=True,
+            )
+
+        try:
+            survey_text = format_survey_for_crew()
+            result = run_initial_pipeline(survey_text, on_progress=on_progress)
+            st.session_state.advisor_result = result
+            st.session_state.error = None
+
+            # Mark final stage done
+            if current_stage[0]:
+                completed_stages.append(current_stage[0])
+                current_stage[0] = None
+
+        except Exception as e:
+            st.session_state.error = str(e)
+            result = None
+            if current_stage[0]:
+                completed_stages.append(current_stage[0])
+
+        # Replace live container with nothing (we'll persist stages as a message)
+        status_container.empty()
+
+        # Save completed stages as a permanent chat message
+        if completed_stages:
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": build_stages_html(completed_stages),
+                "is_html": True,
+                "animated": False,
+            })
 
         if st.session_state.error:
             add_assistant(f"I ran into an issue while processing: {st.session_state.error}\n\nPlease try again.")
@@ -570,16 +721,16 @@ def main():
             st.rerun()
             return
 
-        # Add the portfolio card as a message
-        card_html = build_portfolio_card(result)
+        # Portfolio card
         st.session_state.messages.append({
             "role": "assistant",
-            "content": card_html,
+            "content": build_portfolio_card(result),
             "is_html": True,
             "is_result": True,
+            "animated": False,
         })
 
-        # Add the text recommendation
+        # Text recommendation
         add_assistant(result.portfolio_recommendation)
 
         # Transition message
@@ -589,42 +740,45 @@ def main():
         st.rerun()
         return
 
-    # ── Survey phase: show input for current question ──
+    # ── Survey phase ──
     if st.session_state.phase == "survey" and st.session_state.step < TOTAL:
         q = QUESTIONS[st.session_state.step]
 
         if q["type"] == "options":
-            with st.chat_message("assistant"):
+            options_slot = st.empty()
+            clicked_option = None
+            with options_slot.container():
                 for i, option in enumerate(q["options"]):
                     if st.button(option, key=f"opt_{st.session_state.step}_{i}", use_container_width=True):
-                        record_answer(option)
-                        st.rerun()
-            components.html("""
-                <script>
-                    function scrollToBottom() {
-                        var doc = window.parent.document;
-                        var el = doc.querySelector('section[data-testid="stMain"]')
-                                || doc.querySelector('section.main')
-                                || doc.querySelector('.main');
-                        if (el) el.scrollTop = el.scrollHeight;
-                    }
-                    scrollToBottom();
-                    setTimeout(scrollToBottom, 100);
-                    setTimeout(scrollToBottom, 300);
-                    setTimeout(scrollToBottom, 600);
-                </script>
-            """, height=1)
+                        clicked_option = option
+            if clicked_option:
+                options_slot.empty()
+                record_answer(clicked_option)
+                st.rerun()
+            else:
+                components.html("""
+                    <script>
+                        (function() {
+                            var doc = window.parent.document;
+                            var el = doc.querySelector('section[data-testid="stMain"]')
+                                    || doc.querySelector('section.main')
+                                    || doc.querySelector('.main');
+                            if (el) el.scrollTop = el.scrollHeight;
+                        })();
+                    </script>
+                """, height=0)
 
         else:
-            # Free text input via chat input
             hint = q.get("hint", "Type your answer...")
             if user_input := st.chat_input(hint):
                 record_answer(user_input)
                 st.rerun()
+            else:
+                autofocus_input()
 
         return
 
-    # ── Chat phase: follow-up conversation ──
+    # ── Chat phase ──
     if st.session_state.phase == "chat":
         if prompt := st.chat_input("Ask about your portfolio..."):
             add_user(prompt)
@@ -639,9 +793,15 @@ def main():
                         answer = run_followup(context, st.session_state.advisor_result)
                     except Exception as e:
                         answer = f"I ran into an error: {e}"
-                st.markdown(answer)
+                st.write_stream(typing_generator(answer))
 
-            add_assistant(answer)
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": answer,
+                "animated": False,
+            })
+        else:
+            autofocus_input()
 
 
 if __name__ == "__main__":
