@@ -15,8 +15,6 @@ import scipy.optimize
 import cvxpy as cp
 import pandas as pd
 import yfinance as yf
-from datetime import date, timedelta
-
 from ai_advisor.stocks import get_all_tickers
 
 
@@ -231,41 +229,18 @@ def select_assets(risk_category: str) -> list[str]:
 
 def fetch_price_data(tickers: list[str]) -> pd.DataFrame:
     """
-    Download historical adjusted close prices for the given tickers.
-    Attempts 5 years first; falls back to 3 years if any ticker has
-    less than 3 years of data (e.g. recent IPOs).
+    Return historical adjusted-close prices for the given tickers.
+
+    Data is served from the local parquet cache (data/price_cache.parquet).
+    The cache covers the full approved universe and is updated incrementally —
+    only missing trading days are downloaded from yfinance on each run.
 
     Returns:
         DataFrame of daily adjusted close prices, columns = tickers.
-        Tickers that fail entirely are dropped.
+        Tickers unavailable in the cache are silently dropped.
     """
-    end = date.today()
-    start_5y = end - timedelta(days=5 * 365)
-    start_3y = end - timedelta(days=3 * 365)
-
-    raw = yf.download(tickers, start=start_5y, end=end, auto_adjust=True, progress=False)["Close"]
-
-    if isinstance(raw, pd.Series):
-        raw = raw.to_frame()
-
-    min_rows = 3 * 252  # ~756 trading days
-    sufficient = [col for col in raw.columns if raw[col].notna().sum() >= min_rows]
-    short_history = [col for col in raw.columns if col not in sufficient]
-
-    if short_history:
-        print(f"  [yfinance] {short_history} have < 3y data — retrying on 3y window")
-        raw_3y = yf.download(short_history, start=start_3y, end=end,
-                             auto_adjust=True, progress=False)["Close"]
-        if isinstance(raw_3y, pd.Series):
-            raw_3y = raw_3y.to_frame()
-        raw = raw[sufficient].join(raw_3y, how="outer")
-
-    raw = raw.dropna(axis=1, how="all")
-    failed = [t for t in tickers if t not in raw.columns]
-    if failed:
-        print(f"  [yfinance] Could not fetch data for: {failed} — dropping from universe")
-
-    return raw
+    from ai_advisor.price_cache import load_prices
+    return load_prices(tickers)
 
 
 # ── Risk-Free Rate ──────────────────────────────────────────────────────────
@@ -317,16 +292,45 @@ class PortfolioOptimizer:
     """
 
     def __init__(self, prices: pd.DataFrame, investment_amount: float, max_weight: float = 1.0):
-        self.tickers = list(prices.columns)
-        self.n = len(self.tickers)
         self.investment_amount = investment_amount
         self.max_weight = min(max_weight, 1.0)  # cap at 100%
-        self._prices = prices  # kept for market_tracking benchmark alignment
 
-        ret = prices.pct_change().dropna().values  # shape (T, n), plain numpy array
-        self.mu = ret.mean(axis=0) * 252               # annualized expected returns
-        self.Q  = np.cov(ret, rowvar=False) * 252      # annualized covariance matrix
-        self.cur_prices = prices.iloc[-1].values       # latest close prices
+        # ── Per-column daily returns (NaN before each ticker's IPO/launch) ──
+        ret = prices.pct_change()
+
+        # Drop tickers with fewer than 1 year of actual data — not enough to
+        # estimate statistics, and would otherwise drag the entire return matrix
+        # down to their short history when dropna() is applied below.
+        min_obs = 252  # ~1 trading year
+        valid_cols = [c for c in ret.columns if ret[c].notna().sum() >= min_obs]
+        dropped = sorted(set(ret.columns) - set(valid_cols))
+        if dropped:
+            print(f"  [optimizer] Dropping {dropped} — fewer than 1 year of data")
+            ret    = ret[valid_cols]
+            prices = prices[valid_cols]
+
+        self.tickers    = list(ret.columns)
+        self.n          = len(self.tickers)
+        self.cur_prices = prices.iloc[-1].values
+        self._prices    = prices  # kept for market_tracking benchmark alignment
+
+        # Expected returns: use each ticker's own full available history.
+        # skipna=True means TSLA (since 2010) uses 15 years of its returns even
+        # if another ticker only has 5 years — no data thrown away for mu.
+        self.mu = ret.mean(skipna=True).values * 252
+
+        # Covariance matrix: requires all tickers to have a value on the same
+        # day, so we take the inner-join (dropna) of the filtered return matrix.
+        # With very-short-history tickers already removed above, the overlap
+        # period is now determined by the shortest *valid* ticker (~3–15 years)
+        # rather than the shortest ticker overall (e.g. IBIT at 1 year).
+        ret_aligned = ret.dropna()
+        print(
+            f"  [optimizer] Covariance window: {len(ret_aligned)} days "
+            f"({ret_aligned.index[0].date()} → {ret_aligned.index[-1].date()}) "
+            f"across {self.n} tickers"
+        )
+        self.Q  = np.cov(ret_aligned.values, rowvar=False) * 252
         self.rf = _get_risk_free_rate()
 
     # ── Simple strategies ───────────────────────────────────────
@@ -340,15 +344,13 @@ class PortfolioOptimizer:
         Solves: min  w'*Cov(r)*w  -  2 * cov(r, r_bench)' * w
                 s.t. sum(w) = 1, w >= 0
         which is equivalent to minimising E[(w'r - r_bench)^2].
+        SPY data is served from the local price cache (no extra yfinance call).
         """
+        from ai_advisor.price_cache import load_prices
         prices = self._prices
-        bench_raw = yf.download(
-            benchmark,
-            start=prices.index[0],
-            end=prices.index[-1],
-            auto_adjust=True,
-            progress=False,
-        )["Close"]
+        bench_full = load_prices([benchmark])
+        # Slice to the same date window as the portfolio prices
+        bench_raw = bench_full.loc[prices.index[0]:prices.index[-1], benchmark]
         bench_ret = bench_raw.pct_change().dropna()
 
         asset_ret = prices.pct_change().dropna()
