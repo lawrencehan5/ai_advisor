@@ -316,10 +316,11 @@ class PortfolioOptimizer:
         robust_mean_variance    — minimize variance with return floor (cvxpy QP)
     """
 
-    def __init__(self, prices: pd.DataFrame, investment_amount: float):
+    def __init__(self, prices: pd.DataFrame, investment_amount: float, max_weight: float = 1.0):
         self.tickers = list(prices.columns)
         self.n = len(self.tickers)
         self.investment_amount = investment_amount
+        self.max_weight = min(max_weight, 1.0)  # cap at 100%
         self._prices = prices  # kept for market_tracking benchmark alignment
 
         ret = prices.pct_change().dropna().values  # shape (T, n), plain numpy array
@@ -367,7 +368,7 @@ class PortfolioOptimizer:
         w = cp.Variable(self.n)
         prob = cp.Problem(
             cp.Minimize(cp.quad_form(w, Q_te) - 2 * sigma_bench @ w),
-            [cp.sum(w) == 1, w >= 0],
+            [cp.sum(w) == 1, w >= 0, w <= self.max_weight],
         )
         prob.solve(solver=cp.CLARABEL)
         return np.array(w.value)
@@ -375,24 +376,27 @@ class PortfolioOptimizer:
     # ── cvxpy strategies ────────────────────────────────────────
 
     def minimum_variance(self) -> np.ndarray:
-        """Minimize portfolio variance: min w'Qw  s.t. sum(w)=1, w>=0"""
+        """Minimize portfolio variance: min w'Qw  s.t. sum(w)=1, w>=0, w<=max_weight"""
         w = cp.Variable(self.n)
         prob = cp.Problem(
             cp.Minimize(cp.quad_form(w, self.Q)),
-            [cp.sum(w) == 1, w >= 0]
+            [cp.sum(w) == 1, w >= 0, w <= self.max_weight]
         )
         prob.solve(solver=cp.CLARABEL)
         return np.array(w.value)
 
-    def max_expected_return(self, max_weight: float = 0.40) -> np.ndarray:
+    def max_expected_return(self) -> np.ndarray:
         """
         Maximize expected return with a per-asset cap to prevent 100% concentration.
         max mu'w  s.t. sum(w)=1, w>=0, w<=max_weight
+        The cap is driven by self.max_weight (set from user's preferred number of holdings).
+        Default fallback cap is 40% if max_weight was not restricted by the user.
         """
+        cap = min(self.max_weight, 0.40)
         w = cp.Variable(self.n)
         prob = cp.Problem(
             cp.Maximize(self.mu @ w),
-            [cp.sum(w) == 1, w >= 0, w <= max_weight]
+            [cp.sum(w) == 1, w >= 0, w <= cap]
         )
         prob.solve(solver=cp.CLARABEL)
         return np.array(w.value)
@@ -401,14 +405,15 @@ class PortfolioOptimizer:
         """
         Maximize Sharpe ratio via the Dinkelbach parametric transformation.
         Let y = w/kappa. Solve: min y'Qy  s.t. (mu-rf)'y = 1, y >= 0.
+        The per-asset cap w_i <= max_weight becomes y_i <= max_weight * sum(y) (linear in y).
         Then w = y / sum(y).
         """
         excess = self.mu - self.rf
         y = cp.Variable(self.n)
-        prob = cp.Problem(
-            cp.Minimize(cp.quad_form(y, self.Q)),
-            [excess @ y == 1, y >= 0]
-        )
+        constraints = [excess @ y == 1, y >= 0]
+        if self.max_weight < 1.0:
+            constraints.append(y <= self.max_weight * cp.sum(y))
+        prob = cp.Problem(cp.Minimize(cp.quad_form(y, self.Q)), constraints)
         prob.solve(solver=cp.CLARABEL)
         y_val = np.array(y.value)
         return y_val / y_val.sum()
@@ -418,6 +423,8 @@ class PortfolioOptimizer:
         Max Sharpe portfolio scaled by max_leverage. Weights sum to max_leverage.
         Per Capital Market Line theory, levering the tangency portfolio preserves
         the Sharpe ratio while scaling return and volatility proportionally.
+        Note: post-scaling, per-asset weights can reach max_weight * max_leverage.
+        This is intentional — leverage inherently increases concentration.
         """
         return self.max_sharpe_ratio() * max_leverage
 
@@ -425,10 +432,22 @@ class PortfolioOptimizer:
         """
         Minimize variance subject to a return floor that accounts for
         estimation uncertainty (mirrors the reference strat_robust_optim logic).
-        The floor = max_sharpe_return - avg_sharpe/2.
+        The floor = unconstrained_max_sharpe_return - avg_sharpe/2.
+
+        The return floor uses the UNCONSTRAINED tangency return so it remains
+        a meaningful reference point regardless of max_weight tightness.
+        The variance minimisation itself still respects max_weight.
         """
-        w_msr = self.max_sharpe_ratio()
-        ret_msr = float(self.mu @ w_msr)
+        # Return floor from unconstrained tangency portfolio
+        excess = self.mu - self.rf
+        y_ref = cp.Variable(self.n)
+        cp.Problem(
+            cp.Minimize(cp.quad_form(y_ref, self.Q)),
+            [excess @ y_ref == 1, y_ref >= 0],
+        ).solve(solver=cp.CLARABEL)
+        y_val = np.array(y_ref.value)
+        w_msr_ref = y_val / y_val.sum()
+        ret_msr = float(self.mu @ w_msr_ref)
 
         vol = np.sqrt(np.diag(self.Q))
         avg_sr = float(np.mean((self.mu - self.rf) / (vol + 1e-8)))
@@ -437,7 +456,7 @@ class PortfolioOptimizer:
         w = cp.Variable(self.n)
         prob = cp.Problem(
             cp.Minimize(cp.quad_form(w, self.Q)),
-            [cp.sum(w) == 1, w >= 0, self.mu @ w >= ret_msr - ep_est_err]
+            [cp.sum(w) == 1, w >= 0, w <= self.max_weight, self.mu @ w >= ret_msr - ep_est_err]
         )
         prob.solve(solver=cp.CLARABEL)
         return np.array(w.value)
@@ -473,7 +492,7 @@ class PortfolioOptimizer:
             w0,
             jac=gradient,
             method="SLSQP",
-            bounds=[(0.0, 1.0)] * self.n,
+            bounds=[(0.0, self.max_weight)] * self.n,
             constraints={"type": "eq", "fun": lambda w: np.sum(w) - 1.0},
             options={"ftol": 1e-12, "maxiter": 1000},
         )
@@ -485,6 +504,8 @@ class PortfolioOptimizer:
         """
         Convert a weights array to the allocations list format, filtering
         out positions below 1% and re-normalising the remainder.
+        After re-normalisation, clips to max_weight and renormalises once
+        more to ensure the constraint is never violated by rounding.
         """
         raw = [
             {"ticker": t, "weight": float(w)}
@@ -493,7 +514,18 @@ class PortfolioOptimizer:
         ]
         total = sum(a["weight"] for a in raw)
         for a in raw:
-            a["weight"] = round(a["weight"] / total, 4)
+            a["weight"] = a["weight"] / total
+        # Re-normalising after dropping small positions can push weights above max_weight.
+        # Clip then renormalise to restore the invariant.
+        if self.max_weight < 1.0:
+            for a in raw:
+                a["weight"] = min(a["weight"], self.max_weight)
+            total2 = sum(a["weight"] for a in raw)
+            for a in raw:
+                a["weight"] = round(a["weight"] / total2, 4)
+        else:
+            for a in raw:
+                a["weight"] = round(a["weight"], 4)
         return raw
 
 
@@ -503,16 +535,22 @@ def run_optimization(
     strategy: str,
     tickers: list[str],
     investment_amount: float = 10000.0,
+    max_weight: float = 1.0,
 ) -> OptimizationResult:
     """
     Fetch price data, build a PortfolioOptimizer, run the requested strategy,
     and return a fully populated OptimizationResult.
+
+    Args:
+        max_weight: Per-asset weight cap (0–1). Derived from user's preferred
+                    number of holdings, e.g. 0.15 for a 10-stock portfolio.
     """
     prices = fetch_price_data(tickers)
     tickers = list(prices.columns)
     print(f"  [optimizer] Price data loaded: {len(tickers)} tickers, {len(prices)} trading days")
+    print(f"  [optimizer] Per-asset max weight: {max_weight:.0%}")
 
-    opt = PortfolioOptimizer(prices, investment_amount)
+    opt = PortfolioOptimizer(prices, investment_amount, max_weight=max_weight)
 
     dispatch = {
         "equally_weighted":        opt.equally_weighted,
@@ -554,11 +592,7 @@ def run_optimization(
         expected_return=exp_ret,
         expected_volatility=exp_vol,
         sharpe_ratio=sharpe,
-        metadata={"risk_free_rate": opt.rf, "n_assets": len(final_tickers)},
-        expected_return=exp_ret,
-        expected_volatility=exp_vol,
-        sharpe_ratio=sharpe,
-        metadata={"risk_free_rate": opt.rf, "n_assets": len(final_tickers), "investment_amount": investment_amount},
+        metadata={"risk_free_rate": opt.rf, "n_assets": len(final_tickers), "investment_amount": investment_amount, "max_weight": max_weight},
     )
 
 

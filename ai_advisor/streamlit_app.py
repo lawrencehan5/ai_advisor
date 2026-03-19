@@ -604,6 +604,29 @@ QUESTIONS = [
         ],
     },
     {
+        "key": "num_stocks",
+        "message": "How many holdings would you like in your portfolio?",
+        "type": "options",
+        "options": [
+            "5 or fewer — concentrated, high-conviction",
+            "6–10 — moderately diversified",
+            "11–15 — well diversified",
+            "16–20 — broadly diversified",
+            "20+ — maximum diversification",
+        ],
+    },
+    {
+        "key": "sector_diversification",
+        "message": "Would you like your portfolio spread across different industries and sectors?",
+        "type": "options",
+        "options": [
+            "Yes — spread across as many sectors as possible",
+            "Somewhat — some sector diversity, but don't force it",
+            "No preference — let the optimizer decide",
+            "No — concentrate in a few sectors I believe in",
+        ],
+    },
+    {
         "key": "special_considerations",
         "message": "Last question — anything else I should know? Any stock that you like or dislike? ESG preferences, upcoming big expenses, tax situations, constraints?",
         "type": "freetext",
@@ -634,6 +657,8 @@ SURVEY_LABELS = {
     "loss_tolerance": "Maximum Tolerable Annual Loss",
     "investment_style": "Investment Style",
     "leverage_comfort": "Leverage Comfort",
+    "num_stocks": "Preferred Number of Holdings",
+    "sector_diversification": "Sector Diversification Preference",
     "special_considerations": "Special Considerations",
 }
 
