@@ -12,7 +12,23 @@ import json
 import re
 import time
 from datetime import datetime, timedelta
-import streamlit as st
+
+try:
+    import streamlit as st
+except ModuleNotFoundError:  # Allow CLI/crewai usage without Streamlit installed
+    st = None  # type: ignore[assignment]
+
+
+def _cache_data_noop(*_args, **_kwargs):
+    """Fallback decorator used when Streamlit isn't available."""
+
+    def decorator(fn):
+        return fn
+
+    return decorator
+
+
+cache_data = st.cache_data if st is not None else _cache_data_noop
 
 from openai import OpenAI
 from ai_advisor.stocks import APPROVED_STOCKS, APPROVED_ETFS, get_all_tickers
@@ -20,7 +36,7 @@ from ai_advisor.stocks import APPROVED_STOCKS, APPROVED_ETFS, get_all_tickers
 
 client = OpenAI()
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@cache_data(ttl=3600, show_spinner=False)
 def fetch_stock_data(tickers: list[str] | None = None) -> dict[str, dict]:
     """
     Fetch current price, recent performance, and key metrics for each ticker.

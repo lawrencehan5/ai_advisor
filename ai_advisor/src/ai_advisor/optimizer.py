@@ -125,24 +125,52 @@ def select_assets(risk_category: str) -> list[str]:
     all_stock_tickers = [s["ticker"] for s in APPROVED_STOCKS]
     all_etf_tickers = [e["ticker"] for e in APPROVED_ETFS]
 
-    bond_etfs = ["BND", "AGG", "TLT", "LQD", "HYG"]
-    equity_etfs = ["VOO", "VTI", "QQQ", "VXUS", "SCHD", "VIG", "IWM", "EFA"]
-    alternative_etfs = ["VNQ", "GLD"]
+    # Use curated ETF buckets to seed what the optimizer may choose from.
+    # Note: the main pipeline also uses AI to select tickers; this list is most
+    # relevant for the `optimize_portfolio()` convenience interface.
+    bond_etfs = ["BND", "AGG", "TLT", "SHY", "LQD", "HYG", "TIP"]
+
+    # US / broad equity
+    us_equity_etfs = ["SPY", "VOO", "VTI", "QQQ", "IWM", "VTV", "VUG", "SCHD", "VIG"]
+    # Europe / developed
+    developed_equity_etfs = ["VXUS", "VEA", "EFA", "VGK", "EZU", "EWG", "EWU", "FEZ"]
+    # Emerging markets
+    emerging_equity_etfs = ["VWO", "IEMG", "EEM", "MCHI", "INDA"]
+    # Canada
+    canadian_equity_etfs = ["XIU", "VCN", "VDY", "XRE", "XCG"]
+
+    equity_etfs = (
+        us_equity_etfs + developed_equity_etfs + emerging_equity_etfs + canadian_equity_etfs
+    )
+
+    # Alternatives (real estate + commodities)
+    alternative_etfs = ["VNQ", "GLD", "SLV", "PPLT", "PDBC", "GSG"]
     defensive_stocks = ["JNJ", "PG", "KO", "PFE", "UNH", "BRK.B"]
     growth_stocks = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "HD", "JPM", "XOM", "DIS"]
 
     category = risk_category.upper()
 
     if category == "CONSERVATIVE":
-        return bond_etfs + ["VOO", "SCHD", "VIG"] + defensive_stocks[:3]
+        # More fixed income and defensives; only a small slice of equities.
+        return bond_etfs[:6] + ["VOO", "VTV", "SCHD"] + defensive_stocks[:3]
     elif category == "MODERATE":
-        return bond_etfs[:3] + equity_etfs[:4] + alternative_etfs[:1] + defensive_stocks[:4]
+        # Mix of bonds + a diversified equity basket; small alternative sleeve.
+        return bond_etfs[:4] + equity_etfs[:8] + alternative_etfs[:2] + defensive_stocks[:4]
     elif category == "BALANCED":
-        return bond_etfs[:2] + equity_etfs + alternative_etfs + defensive_stocks[:3] + growth_stocks[:3]
+        # Broad diversification across equities; retain some bonds and alternatives.
+        return (
+            bond_etfs[:3]
+            + equity_etfs[:14]
+            + alternative_etfs[:3]
+            + defensive_stocks[:3]
+            + growth_stocks[:3]
+        )
     elif category == "GROWTH":
-        return equity_etfs + alternative_etfs + growth_stocks + defensive_stocks[:2]
+        # Equity-heavy, with a modest alternative sleeve.
+        return equity_etfs[:18] + alternative_etfs[:2] + growth_stocks + defensive_stocks[:2]
     elif category == "AGGRESSIVE":
-        return equity_etfs[:4] + growth_stocks + alternative_etfs
+        # Strong equity tilt; allow more risk assets but keep alternatives capped.
+        return equity_etfs[:20] + alternative_etfs[:2] + growth_stocks + defensive_stocks[:1]
     else:
         # Fallback: use everything
         return get_all_tickers()

@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import warnings
+import re
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
 
 from ai_advisor.run_advisor import run_initial_pipeline, run_followup, AdvisorResult
@@ -194,6 +195,35 @@ def format_responses(responses: dict[str, str]) -> str:
     return "\n".join(f"{labels.get(k, k)}: {v}" for k, v in responses.items())
 
 
+def _parse_amount_to_number(raw: str) -> float:
+    """Parse user-entered money/number into a float.
+
+    Handles inputs like "$15,000", "15000", "15k", "1.5m", and "none".
+    If parsing fails, returns 0.0.
+    """
+    if raw is None:
+        return 0.0
+
+    s = str(raw).strip().lower()
+    if s in {"", "none", "n/a", "na"}:
+        return 0.0
+
+    s = s.replace(",", "")
+    match = re.search(r"(-?\d+(?:\.\d+)?)\s*([kmb])?", s)
+    if not match:
+        return 0.0
+
+    value = float(match.group(1))
+    suffix = match.group(2)
+    if suffix == "k":
+        value *= 1_000
+    elif suffix == "m":
+        value *= 1_000_000
+    elif suffix == "b":
+        value *= 1_000_000_000
+    return value
+
+
 def conduct_survey() -> str:
     print_header("AI FINANCIAL ADVISOR")
     print("  Welcome! I'll ask you a series of questions about your")
@@ -207,6 +237,12 @@ def conduct_survey() -> str:
     for section in SURVEY_SECTIONS:
         print_header(section["title"])
         for q in section["questions"]:
+            if q["key"] == "debt_details":
+                # If total debt is $0, skip the debt description question.
+                if _parse_amount_to_number(responses.get("total_debt", "")) <= 0:
+                    responses["debt_details"] = "none"
+                    continue
+
             responses[q["key"]] = ask_question(q)
 
     formatted = format_responses(responses)

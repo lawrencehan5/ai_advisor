@@ -9,6 +9,7 @@ load_dotenv()
 import time
 import numpy as np
 import plotly.graph_objects as go
+import re
 import streamlit as st
 import streamlit.components.v1 as components
 from ai_advisor.run_advisor import run_initial_pipeline, run_followup, AdvisorResult
@@ -722,6 +723,39 @@ def build_stages_html(completed: list[str], active: str = None) -> str:
     return html
 
 
+def _parse_amount_to_number(raw: str) -> float:
+    """Parse user-entered money/number into a float.
+
+    Handles inputs like "$15,000", "15000", "15k", "1.5m", and "none".
+    If parsing fails, returns 0.0 (safe default for skipping questions).
+    """
+    if raw is None:
+        return 0.0
+
+    s = str(raw).strip().lower()
+    if s in {"", "none", "n/a", "na"}:
+        return 0.0
+
+    # Normalize common separators/currency.
+    s = s.replace(",", "")
+
+    # Match number with an optional magnitude suffix.
+    match = re.search(r"(-?\d+(?:\.\d+)?)\s*([kmb])?", s)
+    if not match:
+        return 0.0
+
+    value = float(match.group(1))
+    suffix = match.group(2)
+    if suffix == "k":
+        value *= 1_000
+    elif suffix == "m":
+        value *= 1_000_000
+    elif suffix == "b":
+        value *= 1_000_000_000
+
+    return value
+
+
 def advance_to_next_question():
     """Add the next survey question as an assistant message."""
     step = st.session_state.step
@@ -737,7 +771,17 @@ def record_answer(value: str):
 
     add_user(value)
     st.session_state.answers[q["key"]] = value
-    st.session_state.step += 1
+
+    # Decide whether to skip the next question based on the user's answer.
+    next_step = step + 1
+    if q["key"] == "total_debt":
+        # If there is no debt, we shouldn't ask for a debt breakdown.
+        if _parse_amount_to_number(value) <= 0:
+            if next_step < TOTAL and QUESTIONS[next_step]["key"] == "debt_details":
+                st.session_state.answers["debt_details"] = "none"
+                next_step += 1
+
+    st.session_state.step = next_step
 
     if st.session_state.step >= TOTAL:
         st.session_state.phase = "processing"
