@@ -847,7 +847,7 @@ def _make_monte_carlo(
 def _render_charts(params: dict):
     col1, col2 = st.columns(2)
     with col1:
-        st.plotly_chart(_make_pie_chart(params["allocations"]), use_container_width=True)
+        st.plotly_chart(_make_pie_chart(params["allocations"]), width='stretch')
     with col2:
         st.plotly_chart(
             _make_monte_carlo(
@@ -856,7 +856,7 @@ def _render_charts(params: dict):
                 params["investment_amount"],
                 params["investment_horizon"],
             ),
-            use_container_width=True,
+            width='stretch',
         )
 
 
@@ -1277,7 +1277,7 @@ def main():
             "expected_return": opt.expected_return,
             "expected_volatility": opt.expected_volatility,
             "investment_amount": opt.metadata.get("investment_amount", 10000.0),
-            "investment_horizon": result.investment_horizon or "5-10yr",
+            "investment_horizon": opt.metadata.get("investment_horizon", "5-10yr"),
         }
         st.session_state.chart_params = _chart_params
         st.session_state.messages.append({
