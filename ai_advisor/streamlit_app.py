@@ -496,6 +496,10 @@ QUESTIONS = [
         "message": "Could you briefly describe what those debts are?",
         "type": "freetext",
         "hint": "e.g. $20k student loan at 5%, $3k credit card — or type 'none'",
+        "skip_if": lambda ans: ans.get("total_debt", "").strip().lower() in {
+            "0", "$0", "0.00", "$0.00", "none", "no debt", "n/a", "nil", "zero",
+        },
+        "skip_value": "none",
     },
     {
         "key": "experience_level",
@@ -982,6 +986,16 @@ def record_answer(value: str):
     if q["key"] == "total_debt" and _no_debt(value):
         st.session_state.answers["debt_details"] = "none"
         st.session_state.step += 1
+
+    # Auto-skip any questions whose skip_if condition is satisfied
+    while st.session_state.step < TOTAL:
+        next_q = QUESTIONS[st.session_state.step]
+        skip_if = next_q.get("skip_if")
+        if skip_if and skip_if(st.session_state.answers):
+            st.session_state.answers[next_q["key"]] = next_q.get("skip_value", "none")
+            st.session_state.step += 1
+        else:
+            break
 
     if st.session_state.step >= TOTAL:
         st.session_state.phase = "processing"
