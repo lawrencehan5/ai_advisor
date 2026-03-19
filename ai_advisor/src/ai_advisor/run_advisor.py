@@ -82,7 +82,13 @@ def _extract_survey_data(survey_text: str) -> dict:
                     '  "excluded_tickers": [<list of ticker strings the user wants EXCLUDED>],\n'
                     '  "included_tickers": [<list of ticker strings the user wants INCLUDED or prefers>],\n'
                     '  "num_stocks": <integer: target number of holdings — map "5 or fewer"→5, "6-10"→8, "11-15"→12, "16-20"→18, "20+"→25, default 12>,\n'
-                    '  "sector_diversified": <true if user wants broad sector diversity, false if they prefer concentration, null if no preference>\n'
+                    '  "sector_diversified": <true if user wants broad sector diversity, false if they prefer concentration, null if no preference>,\n'
+                    '  "experience_level": "<one of: none, beginner, intermediate, advanced — map: none/never→none, beginner/little→beginner, intermediate/regularly→intermediate, advanced/actively→advanced>",\n'
+                    '  "investment_horizon": "<one of: <1yr, 1-3yr, 3-5yr, 5-10yr, 10-20yr, 20+yr — map from the horizon question answer>",\n'
+                    '  "investment_style": "<one of: passive, slightly_passive, neutral, slightly_active, active — map from passive/active preference answer>",\n'
+                    '  "leverage_comfort": "<one of: no, maybe, yes — map: No→no, Maybe/open to→maybe, Yes→yes>",\n'
+                    '  "existing_investments": <number in dollars, 0 if user has none or said none/no>,\n'
+                    '  "investment_objective": "<one of: protect_capital, track_market, balance, maximize_returns, income — map: Protect capital→protect_capital, Track the market→track_market, Balance growth→balance, Maximize returns→maximize_returns, Steady income→income, default balance>"\n'
                     '}\n\n'
                     "Rules:\n"
                     '- Convert ALL money formats to a plain number: "100k"→100000, "$50,000"→50000, '
@@ -90,7 +96,8 @@ def _extract_survey_data(survey_text: str) -> dict:
                     "- If user says exclude/remove/avoid/no/don't include a ticker, put it in excluded_tickers\n"
                     "- If user says include/prefer/want/must have a ticker, put it in included_tickers\n"
                     "- If no investment amount found, use 10000\n"
-                    "- If no exclusions/inclusions, use empty lists"
+                    "- If no exclusions/inclusions, use empty lists\n"
+                    "- For existing_investments: '401k worth $50k' → 50000; 'none', 'no', '0' → 0"
                 ),
             },
             {
@@ -111,11 +118,17 @@ def _extract_survey_data(survey_text: str) -> dict:
         data = {}
 
     return {
-        "investment_amount": float(data.get("investment_amount", 10000)),
-        "excluded_tickers": [t.upper() for t in data.get("excluded_tickers", [])],
-        "included_tickers": [t.upper() for t in data.get("included_tickers", [])],
-        "num_stocks": int(data.get("num_stocks", 12)),
-        "sector_diversified": data.get("sector_diversified", None),
+        "investment_amount":    float(data.get("investment_amount", 10000)),
+        "excluded_tickers":     [t.upper() for t in data.get("excluded_tickers", [])],
+        "included_tickers":     [t.upper() for t in data.get("included_tickers", [])],
+        "num_stocks":           int(data.get("num_stocks", 12)),
+        "sector_diversified":   data.get("sector_diversified", None),
+        "experience_level":     data.get("experience_level", "none"),
+        "investment_horizon":   data.get("investment_horizon", "3-5yr"),
+        "investment_style":     data.get("investment_style", "neutral"),
+        "leverage_comfort":     data.get("leverage_comfort", "no"),
+        "existing_investments": float(data.get("existing_investments", 0)),
+        "investment_objective": data.get("investment_objective", "balance"),
     }
 
 
@@ -406,11 +419,17 @@ def run_initial_pipeline(
     # ── Phase 0: Extract structured data from raw survey ────────
     progress("Reading your survey responses")
     survey_data = _extract_survey_data(survey_responses)
-    investment_amount = survey_data["investment_amount"]
-    excluded_tickers = survey_data["excluded_tickers"]
-    included_tickers = survey_data["included_tickers"]
-    num_stocks = survey_data["num_stocks"]
-    sector_diversified = survey_data["sector_diversified"]
+    investment_amount    = survey_data["investment_amount"]
+    excluded_tickers     = survey_data["excluded_tickers"]
+    included_tickers     = survey_data["included_tickers"]
+    num_stocks           = survey_data["num_stocks"]
+    sector_diversified   = survey_data["sector_diversified"]
+    experience_level     = survey_data["experience_level"]
+    investment_horizon   = survey_data["investment_horizon"]
+    investment_style     = survey_data["investment_style"]
+    leverage_comfort     = survey_data["leverage_comfort"]
+    existing_investments = survey_data["existing_investments"]
+    investment_objective = survey_data["investment_objective"]
 
     # Derive per-asset max weight from target number of stocks:
     # e.g. 5 stocks → 30% cap, 8 → 20%, 12 → 15%, 18 → 10%, 25 → 8%
@@ -419,7 +438,10 @@ def run_initial_pipeline(
     print(f"  Parsed: investment=${investment_amount:,.0f}, "
           f"exclude={excluded_tickers}, include={included_tickers}, "
           f"num_stocks={num_stocks}, sector_diversified={sector_diversified}, "
-          f"max_weight={max_weight:.0%}")
+          f"max_weight={max_weight:.0%}, "
+          f"experience={experience_level}, horizon={investment_horizon}, "
+          f"style={investment_style}, leverage={leverage_comfort}, "
+          f"existing=${existing_investments:,.0f}, objective={investment_objective}")
 
     # ── Phase 0b: Fetch real-time market data ───────────────────
     progress("Fetching real-time stock prices and market news")
@@ -488,7 +510,17 @@ def run_initial_pipeline(
         sector_diversified=sector_diversified,
     )
 
-    strategy = select_strategy(risk_category, optimizer_strategy)
+    strategy = select_strategy(
+        risk_category,
+        optimizer_strategy,
+        experience_level=experience_level,
+        investment_horizon=investment_horizon,
+        investment_style=investment_style,
+        leverage_comfort=leverage_comfort,
+        existing_investments=existing_investments,
+        investment_amount=investment_amount,
+        investment_objective=investment_objective,
+    )
 
     print(f"  Risk Category: {risk_category}")
     print(f"  Optimizer Strategy: {strategy}")

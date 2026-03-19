@@ -63,13 +63,20 @@ STRATEGIES = {
     },
 }
 
-# Maps the AI's risk category → recommended optimizer strategies (ordered by preference)
-RISK_TO_STRATEGIES = {
-    "CONSERVATIVE": ["minimum_variance", "market_tracking", "equally_weighted"],
-    "MODERATE":     ["equal_risk_contribution", "robust_mean_variance", "equally_weighted"],
-    "BALANCED":     ["max_sharpe_ratio", "robust_mean_variance", "equal_risk_contribution"],
-    "GROWTH":       ["max_sharpe_ratio", "max_expected_return", "robust_mean_variance"],
-    "AGGRESSIVE":   ["max_expected_return", "leveraged_max_sharpe", "max_sharpe_ratio"],
+# Base suitability scores for every (risk_level × strategy) combination.
+# Columns: CONSERVATIVE, MODERATE, BALANCED, GROWTH, AGGRESSIVE
+# Higher = more appropriate a priori.  Scoring adjustments (experience,
+# horizon, style, leverage, objective) are added on top at selection time.
+_RISK_ORDER = ["CONSERVATIVE", "MODERATE", "BALANCED", "GROWTH", "AGGRESSIVE"]
+_BASE_SCORES: dict[str, list[int]] = {
+    "equally_weighted":        [2, 3, 2, 2, 2],
+    "market_tracking":         [8, 5, 4, 2, 1],
+    "minimum_variance":        [9, 6, 3, 2, 1],
+    "equal_risk_contribution": [5, 8, 7, 4, 2],
+    "robust_mean_variance":    [4, 7, 8, 7, 4],
+    "max_sharpe_ratio":        [2, 4, 9, 8, 6],
+    "max_expected_return":     [1, 2, 4, 9, 8],
+    "leveraged_max_sharpe":    [0, 0, 1, 3, 9],
 }
 
 
@@ -95,19 +102,23 @@ def select_strategy(
     risk_category: str,
     agent_strategy: str = "",
     *,
-    experience_level: str = "None",
+    experience_level: str = "none",
     investment_horizon: str = "3-5yr",
     investment_style: str = "neutral",
     leverage_comfort: str = "no",
+    existing_investments: float = 0.0,
+    investment_amount: float = 10_000.0,
+    investment_objective: str = "",
 ) -> str:
     """
     Select optimizer strategy using multi-dimensional scoring.
 
     1. Trust the agent's recommendation if it's a valid strategy key
        and passes hard disqualification rules.
-    2. Otherwise score all RISK_TO_STRATEGIES candidates using
-       experience, horizon, style, and leverage signals, then return
-       the highest-scored candidate (ties broken by list order).
+    2. Otherwise score ALL 8 strategies using a base-score matrix
+       (indexed by risk level) plus adjustments for experience, horizon,
+       style, leverage, existing portfolio, and investment objective.
+       The highest scorer wins.
     """
     leverage_ok = leverage_comfort.lower() not in ("no",)
     exp_lower = experience_level.lower()
@@ -123,79 +134,71 @@ def select_strategy(
         if not disqualified:
             return agent_strategy
 
-    # Step 2: score candidates from the risk category
+    # Step 2: score all 8 strategies using base-score matrix + adjustments
     category = risk_category.upper()
-    candidates = RISK_TO_STRATEGIES.get(category, ["max_sharpe_ratio"])
-    scores: dict[str, float] = {c: 0.0 for c in candidates}
+    risk_idx = _RISK_ORDER.index(category) if category in _RISK_ORDER else 2  # default BALANCED
+
+    # Initialise scores from the base matrix
+    scores: dict[str, float] = {s: float(_BASE_SCORES[s][risk_idx]) for s in _BASE_SCORES}
 
     def adj(s: str, d: float):
-        if s in scores:
-            scores[s] += d
+        scores[s] += d
 
-    # Passive/active style signals
-    if style_lower == "passive":
-        adj("market_tracking", +3); adj("equally_weighted", +1)
+    # ── Investment objective (strongest signal — direct user preference) ──
+    objective_boosts: dict[str, dict[str, float]] = {
+        "protect_capital":  {"minimum_variance": +5, "equal_risk_contribution": +3},
+        "track_market":     {"market_tracking": +6, "equally_weighted": +2},
+        "balance":          {"max_sharpe_ratio": +5, "robust_mean_variance": +3},
+        "maximize_returns": {"max_expected_return": +5, "max_sharpe_ratio": +2},
+        "income":           {"market_tracking": +4, "equal_risk_contribution": +2, "robust_mean_variance": +1},
+    }
+    for strat, boost in objective_boosts.get(investment_objective.lower(), {}).items():
+        adj(strat, boost)
+
+    # ── Passive/active style ──
+    if "passive" in style_lower:
+        strength = +2 if style_lower == "slightly_passive" else +3
+        adj("market_tracking", strength); adj("equally_weighted", +1)
         adj("max_expected_return", -2); adj("leveraged_max_sharpe", -3)
-    elif style_lower == "active":
-        adj("max_expected_return", +2); adj("max_sharpe_ratio", +2)
+    elif "active" in style_lower:
+        strength = +1 if style_lower == "slightly_active" else +2
+        adj("max_expected_return", strength); adj("max_sharpe_ratio", strength)
         adj("leveraged_max_sharpe", +1); adj("market_tracking", -2)
 
-    # Experience gates
+    # ── Experience gates ──
     if exp_lower in ("none", "beginner"):
         adj("leveraged_max_sharpe", -5); adj("max_expected_return", -2)
         adj("minimum_variance", +2); adj("equally_weighted", +2); adj("market_tracking", +1)
 
-    # Horizon gates
+    # ── Horizon gates ──
     if horizon_lower in ("<1yr", "1-3yr"):
         adj("minimum_variance", +2); adj("leveraged_max_sharpe", -5); adj("max_expected_return", -1)
-    elif horizon_lower == "20+yr":
-        adj("max_expected_return", +1)
+    elif horizon_lower in ("10-20yr", "20+yr"):
+        adj("max_expected_return", +1); adj("max_sharpe_ratio", +1)
         if leverage_ok:
             adj("leveraged_max_sharpe", +1)
 
-    # Leverage hard gate
+    # ── Existing portfolio signal ──
+    ratio = existing_investments / max(investment_amount, 1.0)
+    if existing_investments == 0:
+        # No existing investments — this is their only exposure; nudge toward diversification
+        adj("minimum_variance", +1); adj("equal_risk_contribution", +1)
+    elif ratio > 5:
+        # New portfolio is a small add-on to large existing wealth; can afford more risk
+        adj("max_expected_return", +1); adj("max_sharpe_ratio", +1); adj("leveraged_max_sharpe", +1)
+
+    # ── Leverage hard gate (always applied last) ──
     if leverage_comfort.lower() == "no":
         adj("leveraged_max_sharpe", -10)
     elif leverage_comfort.lower() == "yes":
         adj("leveraged_max_sharpe", +2)
 
-    # Prefer earlier in list on ties (preserves existing priority for neutral profiles)
-    return max(candidates, key=lambda c: (scores[c], -candidates.index(c)))
-    scores: dict[str, float] = {c: 0.0 for c in candidates}
-
-    def adj(s: str, d: float):
-        if s in scores:
-            scores[s] += d
-
-    # Passive/active style signals
-    if style_lower == "passive":
-        adj("market_tracking", +3); adj("equally_weighted", +1)
-        adj("max_expected_return", -2); adj("leveraged_max_sharpe", -3)
-    elif style_lower == "active":
-        adj("max_expected_return", +2); adj("max_sharpe_ratio", +2)
-        adj("leveraged_max_sharpe", +1); adj("market_tracking", -2)
-
-    # Experience gates
-    if exp_lower in ("none", "beginner"):
-        adj("leveraged_max_sharpe", -5); adj("max_expected_return", -2)
-        adj("minimum_variance", +2); adj("equally_weighted", +2); adj("market_tracking", +1)
-
-    # Horizon gates
-    if horizon_lower in ("<1yr", "1-3yr"):
-        adj("minimum_variance", +2); adj("leveraged_max_sharpe", -5); adj("max_expected_return", -1)
-    elif horizon_lower == "20+yr":
-        adj("max_expected_return", +1)
-        if leverage_ok:
-            adj("leveraged_max_sharpe", +1)
-
-    # Leverage hard gate
-    if leverage_comfort.lower() == "no":
-        adj("leveraged_max_sharpe", -10)
-    elif leverage_comfort.lower() == "yes":
-        adj("leveraged_max_sharpe", +2)
-
-    # Prefer earlier in list on ties (preserves existing priority for neutral profiles)
-    return max(candidates, key=lambda c: (scores[c], -candidates.index(c)))
+    winner = max(scores, key=lambda s: scores[s])
+    print(
+        f"  [strategy] scores: "
+        + ", ".join(f"{s}={scores[s]:.0f}" for s in sorted(scores, key=lambda x: -scores[x]))
+    )
+    return winner
 
 
 def select_assets(risk_category: str) -> list[str]:
@@ -272,6 +275,45 @@ def _get_risk_free_rate() -> float:
     return _CACHED_RF
 
 
+# ── Black-Litterman Return Estimation ───────────────────────────────────────
+
+def _black_litterman_mu(Q: np.ndarray, rf: float) -> np.ndarray:
+    """
+    Black-Litterman expected returns with no explicit views (pure market equilibrium prior).
+
+    Formula: μ_BL = λ · Q · w_mkt + rf
+    where:
+      λ     = market risk-aversion, calibrated from SPY: (μ_SPY - rf) / σ²_SPY
+      w_mkt = equal-weight market portfolio (1/n per asset)
+      Q     = annualised covariance matrix of the selected assets
+
+    With no views this is equivalent to CAPM-implied returns. The key advantage
+    over raw historical means is stability: historical μ is extremely noisy
+    (the 'error-maximisation' problem in Markowitz) while BL equilibrium returns
+    are smooth and produce better-diversified optimal portfolios.
+    """
+    n = Q.shape[0]
+    w_mkt = np.ones(n) / n  # equal-weight market portfolio
+
+    # Calibrate λ from SPY historical data (already in the local price cache)
+    from ai_advisor.price_cache import load_prices
+    spy_prices = load_prices(["SPY"])
+    spy_ret     = spy_prices["SPY"].pct_change().dropna()
+    spy_mu_ann  = float(spy_ret.mean() * 252)
+    spy_var_ann = float(spy_ret.var() * 252)
+    lam = (spy_mu_ann - rf) / spy_var_ann if spy_var_ann > 1e-8 else 2.5
+    lam = max(1.0, min(lam, 5.0))  # clamp to sensible range [1, 5]
+
+    # Implied equilibrium excess returns, then add back risk-free rate
+    pi = lam * (Q @ w_mkt)
+    mu_bl = pi + rf
+    print(
+        f"  [optimizer] Black-Litterman: λ={lam:.2f}  "
+        f"μ_BL range [{mu_bl.min():.1%}, {mu_bl.max():.1%}]"
+    )
+    return mu_bl
+
+
 # ── Portfolio Optimizer Class ───────────────────────────────────────────────
 
 class PortfolioOptimizer:
@@ -314,11 +356,6 @@ class PortfolioOptimizer:
         self.cur_prices = prices.iloc[-1].values
         self._prices    = prices  # kept for market_tracking benchmark alignment
 
-        # Expected returns: use each ticker's own full available history.
-        # skipna=True means TSLA (since 2010) uses 15 years of its returns even
-        # if another ticker only has 5 years — no data thrown away for mu.
-        self.mu = ret.mean(skipna=True).values * 252
-
         # Covariance matrix: requires all tickers to have a value on the same
         # day, so we take the inner-join (dropna) of the filtered return matrix.
         # With very-short-history tickers already removed above, the overlap
@@ -332,6 +369,11 @@ class PortfolioOptimizer:
         )
         self.Q  = np.cov(ret_aligned.values, rowvar=False) * 252
         self.rf = _get_risk_free_rate()
+
+        # Expected returns via Black-Litterman (no views — pure market equilibrium
+        # prior). This replaces raw historical means, which are extremely noisy
+        # and tend to concentrate weight in recent high-performers.
+        self.mu = _black_litterman_mu(self.Q, self.rf)
 
     # ── Simple strategies ───────────────────────────────────────
 

@@ -631,6 +631,18 @@ QUESTIONS = [
         ],
     },
     {
+        "key": "investment_objective",
+        "message": "What is your primary investment objective?",
+        "type": "options",
+        "options": [
+            "Protect capital — prioritize safety, accept lower returns",
+            "Track the market — match S&P 500 performance reliably",
+            "Balance growth and risk — optimize risk-adjusted returns",
+            "Maximize returns — willing to accept higher volatility",
+            "Steady income — dividends and regular cash flow",
+        ],
+    },
+    {
         "key": "special_considerations",
         "message": "Last question — anything else I should know? Any stock that you like or dislike? ESG preferences, upcoming big expenses, tax situations, constraints?",
         "type": "freetext",
@@ -663,6 +675,7 @@ SURVEY_LABELS = {
     "leverage_comfort": "Leverage Comfort",
     "num_stocks": "Preferred Number of Holdings",
     "sector_diversification": "Sector Diversification Preference",
+    "investment_objective": "Primary Investment Objective",
     "special_considerations": "Special Considerations",
 }
 
@@ -919,6 +932,16 @@ def build_portfolio_card(result: AdvisorResult) -> str:
             </div>
         </div>
     """
+
+    metrics += (
+        '<p style="font-size:0.7rem; color:#64748b; margin: 0.5rem 0 0.75rem 0; line-height:1.5;">'
+        "<b>Exp. Return</b>: annualized portfolio return estimated via Black-Litterman market "
+        "equilibrium — anchors to CAPM-implied returns rather than raw historical averages. "
+        "<b>Volatility</b>: annualized standard deviation — in a typical year, actual returns "
+        "land within roughly ±1\u00d7 volatility of the expected return (~68% of years). "
+        "The Monte Carlo chart uses these as inputs to geometric Brownian motion."
+        "</p>"
+    )
 
     max_w = max((a["weight"] for a in result.allocations), default=1)
     rows = ""
