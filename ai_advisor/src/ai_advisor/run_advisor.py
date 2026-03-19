@@ -54,6 +54,10 @@ class AdvisorResult:
     excluded_tickers: list[str] = field(default_factory=list)
     included_tickers: list[str] = field(default_factory=list)
     market_context: str = ""
+    experience_level: str = ""
+    investment_horizon: str = ""
+    investment_style: str = ""
+    leverage_comfort: str = ""
 
 
 # ── LLM Extraction (replaces all regex parsers) ────────────────────────────
@@ -80,7 +84,11 @@ def _extract_survey_data(survey_text: str) -> dict:
                     '{\n'
                     '  "investment_amount": <number in dollars, e.g. 100000 for "100k" or "a hundred thousand">,\n'
                     '  "excluded_tickers": [<list of ticker strings the user wants EXCLUDED>],\n'
-                    '  "included_tickers": [<list of ticker strings the user wants INCLUDED or prefers>]\n'
+                    '  "included_tickers": [<list of ticker strings the user wants INCLUDED or prefers>],\n'
+                    '  "experience_level": "<one of: None, Beginner, Intermediate, Advanced>",\n'
+                    '  "investment_horizon": "<one of: <1yr, 1-3yr, 3-5yr, 5-10yr, 10-20yr, 20+yr>",\n'
+                    '  "investment_style": "<one of: passive, slightly_passive, neutral, slightly_active, active>",\n'
+                    '  "leverage_comfort": "<one of: no, maybe, yes>"\n'
                     '}\n\n'
                     "Rules:\n"
                     '- Convert ALL money formats to a plain number: "100k"→100000, "$50,000"→50000, '
@@ -88,7 +96,15 @@ def _extract_survey_data(survey_text: str) -> dict:
                     "- If user says exclude/remove/avoid/no/don't include a ticker, put it in excluded_tickers\n"
                     "- If user says include/prefer/want/must have a ticker, put it in included_tickers\n"
                     "- If no investment amount found, use 10000\n"
-                    "- If no exclusions/inclusions, use empty lists"
+                    "- If no exclusions/inclusions, use empty lists\n"
+                    '- experience_level: map first word of answer — "None"→None, "Beginner"→Beginner, '
+                    '"Intermediate"→Intermediate, "Advanced"→Advanced. Default: None\n'
+                    '- investment_horizon: map "Less than 1 year"→<1yr, "1–3 years"→1-3yr, '
+                    '"3–5 years"→3-5yr, "5–10 years"→5-10yr, "10–20 years"→10-20yr, "20+ years"→20+yr. Default: 3-5yr\n'
+                    '- investment_style: map first word of answer — "Passive"→passive, '
+                    '"Slightly"→slightly_passive or slightly_active (check full text), '
+                    '"No"→neutral, "Active"→active. Default: neutral\n'
+                    '- leverage_comfort: "No —"→no, "Maybe —"→maybe, "Yes —"→yes. Default: no'
                 ),
             },
             {
@@ -112,6 +128,10 @@ def _extract_survey_data(survey_text: str) -> dict:
         "investment_amount": float(data.get("investment_amount", 10000)),
         "excluded_tickers": [t.upper() for t in data.get("excluded_tickers", [])],
         "included_tickers": [t.upper() for t in data.get("included_tickers", [])],
+        "experience_level": data.get("experience_level", "None"),
+        "investment_horizon": data.get("investment_horizon", "3-5yr"),
+        "investment_style": data.get("investment_style", "neutral"),
+        "leverage_comfort": data.get("leverage_comfort", "no"),
     }
 
 
@@ -279,9 +299,15 @@ def run_initial_pipeline(
     investment_amount = survey_data["investment_amount"]
     excluded_tickers = survey_data["excluded_tickers"]
     included_tickers = survey_data["included_tickers"]
+    experience_level = survey_data["experience_level"]
+    investment_horizon = survey_data["investment_horizon"]
+    investment_style = survey_data["investment_style"]
+    leverage_comfort = survey_data["leverage_comfort"]
 
     print(f"  Parsed: investment=${investment_amount:,.0f}, "
-          f"exclude={excluded_tickers}, include={included_tickers}")
+          f"exclude={excluded_tickers}, include={included_tickers}, "
+          f"experience={experience_level}, horizon={investment_horizon}, "
+          f"style={investment_style}, leverage={leverage_comfort}")
 
     # ── Phase 0b: Fetch real-time market data ───────────────────
     progress("Fetching real-time stock prices and market news")
@@ -348,7 +374,14 @@ def run_initial_pipeline(
         market_context=market_context,
     )
 
-    strategy = select_strategy(risk_category, optimizer_strategy)
+    strategy = select_strategy(
+        risk_category,
+        optimizer_strategy,
+        experience_level=experience_level,
+        investment_horizon=investment_horizon,
+        investment_style=investment_style,
+        leverage_comfort=leverage_comfort,
+    )
 
     print(f"  Risk Category: {risk_category}")
     print(f"  Optimizer Strategy: {strategy}")
@@ -421,6 +454,10 @@ def run_initial_pipeline(
         excluded_tickers=excluded_tickers,
         included_tickers=included_tickers,
         market_context=market_context,
+        experience_level=experience_level,
+        investment_horizon=investment_horizon,
+        investment_style=investment_style,
+        leverage_comfort=leverage_comfort,
     )
 
 
@@ -484,8 +521,10 @@ def run_followup(question: str, advisor_result: AdvisorResult) -> str:
         f"financial situation when explaining."
     )
 
+    safe_context = context.replace("{", "{{").replace("}", "}}")
+
     followup_task = Task(
-        description=context,
+        description=safe_context,
         expected_output=(
             "A clear, helpful answer that references the user's specific "
             "financial profile, goals, and constraints."
