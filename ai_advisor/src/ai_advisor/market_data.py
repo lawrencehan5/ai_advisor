@@ -115,7 +115,7 @@ def fetch_stock_data(tickers: list[str] | None = None) -> dict[str, dict]:
                     info = {}
                     for attempt in range(3):
                         try:
-                            info = stock_ticker_objs[ticker].info
+                            info = stock_ticker_objs[ticker].info or {}
                             break
                         except Exception as e:
                             if "Too Many Requests" in str(e) or "Rate" in str(e):
