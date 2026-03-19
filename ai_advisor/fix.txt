@@ -1,0 +1,31 @@
+The Problem
+Root cause: stBottomBlockContainer appearing and disappearing between question types.
+
+Streamlit renders the chat input (st.chat_input()) inside a special fixed element called stBottomBlockContainer. The critical detail is:
+
+Text questions → st.chat_input() is called → stBottomBlockContainer exists in the DOM
+Button questions → no st.chat_input() is called → stBottomBlockContainer does not exist
+When you went from a button question → text question, stBottomBlockContainer suddenly appeared. This changed the page layout (the main content area shrank to make room for the bottom bar). Streamlit detected this layout shift and triggered its built-in auto-scroll to bring the latest content back into view — sweeping from the top all the way to the bottom.
+
+The reason consecutive button questions never had this problem: stBottomBlockContainer was absent in both renders, so no layout change, no scroll.
+
+The reason all the JS scroll hacks didn't work: they were fighting against Streamlit's scroll after it already fired. The layout shift was the trigger, and you can't easily intercept Streamlit's internal React scroll logic from injected JavaScript.
+
+The Fix
+Instead of fighting the scroll after it happened, we prevented the layout shift from occurring in the first place — two parts:
+
+1. Dummy st.chat_input() during button questions
+
+
+st.chat_input("", key=f"_opts_{st.session_state.step}")
+This forces stBottomBlockContainer to always be in the DOM, even during button questions. Now the bottom bar never appears or disappears — it's always there.
+
+2. CSS sentinel to hide (not remove) it
+
+
+body:has(#options-q-active) [data-testid="stBottomBlockContainer"] {
+    visibility: hidden !important;
+}
+visibility: hidden hides it visually but — crucially — keeps it in the layout at the same height. display: none would have removed it from layout and caused the same shift. The sentinel div #options-q-active is only present during button question renders, so the CSS activates and deactivates automatically.
+
+The result: from Streamlit's perspective, the bottom bar never changes size or existence, so it never recalculates layout, and never triggers the auto-scroll.

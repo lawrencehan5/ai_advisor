@@ -8,6 +8,7 @@ load_dotenv()
 
 import time
 import numpy as np
+from pathlib import Path
 import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
@@ -15,10 +16,17 @@ from ai_advisor.run_advisor import run_initial_pipeline, run_followup, AdvisorRe
 
 # ── Page Config ─────────────────────────────────────────────────────────────
 
+try:
+    from PIL import Image as _PIL_Image
+    _fav = Path(__file__).parent / "favicon.ico"
+    _page_icon = _PIL_Image.open(_fav) if _fav.exists() else "◆"
+except Exception:
+    _page_icon = "◆"
+
 st.set_page_config(
     page_title="AI Financial Advisor",
-    page_icon="◆",
-    layout="centered",
+    page_icon=_page_icon,
+    layout="wide",
     initial_sidebar_state="collapsed",
 )
 
@@ -28,45 +36,84 @@ st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
+    /* ── Theme-aware variables ── */
     :root {
         --accent-gold: #c9a24e;
         --accent-gold-dim: rgba(201,162,78,0.12);
-        --text-muted: #64748b;
-        --text-secondary: #94a3b8;
-        --text-primary: #f1f5f9;
-        --border-subtle: #1e293b;
+        --text-muted: #6b7280;
+        --border-color: rgba(128, 128, 128, 0.18);
+        --card-bg: rgba(128, 128, 128, 0.05);
+    }
+    @media (prefers-color-scheme: dark) {
+        :root { --text-secondary: #94a3b8; }
+    }
+    @media (prefers-color-scheme: light) {
+        :root { --text-secondary: #475569; }
     }
 
     .stApp { font-family: 'DM Sans', sans-serif; }
     #MainMenu, header, footer, .stDeployButton { display: none !important; }
-
-    /* Remove default top padding so brand bar sits flush at the top */
     .block-container { padding-top: 1rem !important; }
+    /* Prevent animated scroll so rerun scroll-jumps are instant, not a sweep */
+    section[data-testid="stMain"] { scroll-behavior: auto !important; }
+    /* During options questions the chat-input bottom bar is hidden but kept in
+       the DOM so its height never changes — this prevents the layout-shift that
+       causes Streamlit to auto-scroll when the bar reappears for text questions. */
+    body:has(#options-q-active) [data-testid="stBottomBlockContainer"] {
+        visibility: hidden !important;
+    }
 
-    /* User avatar — green */
+    /* Constrain chat/survey/processing to readable width;
+       the sentinel #chat-mode div is injected for all non-welcome phases. */
+    body:has(#chat-mode) .block-container {
+        max-width: 760px !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
+        padding-left: 1.5rem !important;
+        padding-right: 1.5rem !important;
+    }
+    /* Constrain the sticky chat input bar (Streamlit 1.40+ uses stBottomBlockContainer) */
+    body:has(#chat-mode) [data-testid="stBottomBlockContainer"] {
+        max-width: 760px !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
+        padding-left: 1.5rem !important;
+        padding-right: 1.5rem !important;
+    }
+    /* Fallback for other Streamlit versions */
+    body:has(#chat-mode) [data-testid="stBottom"] {
+        max-width: 760px !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
+    }
+
+    /* Landing page content: cap width on very wide monitors */
+    .landing-content { max-width: 1200px; margin: 0 auto; }
+
+    /* User avatar */
     [data-testid="stChatMessageAvatarUser"] {
         background-color: #22c55e !important;
         color: #fff !important;
     }
 
-    /* Brand */
+    /* Brand bar */
     .brand-bar {
         font-family: 'JetBrains Mono', monospace;
         font-size: 0.75rem; font-weight: 500; letter-spacing: 0.15em;
         text-transform: uppercase; color: var(--text-muted);
-        padding: 1rem 0 0.5rem 0; border-bottom: 1px solid var(--border-subtle);
+        padding: 1rem 0 0.5rem 0; border-bottom: 1px solid var(--border-color);
         margin-bottom: 1rem;
+        display: flex; align-items: center; justify-content: space-between;
     }
-    .brand-bar span { color: var(--accent-gold); }
+    .brand-name { color: var(--accent-gold); }
 
-    /* ── User messages: avatar on the right ── */
+    /* ── User messages: avatar on right ── */
     [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) {
         flex-direction: row-reverse !important;
     }
     [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) [data-testid="stMarkdownContainer"] {
         text-align: right !important;
     }
-    /* Shrink user bubble to fit text, max 80% width */
     [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) [data-testid="stChatMessageContent"] {
         display: inline-flex !important;
         flex-direction: column !important;
@@ -75,8 +122,8 @@ st.markdown("""
         width: auto !important;
     }
     [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) [data-testid="stChatMessageContent"] > div {
-        background: rgba(255,255,255,0.06) !important;
-        border: 1px solid var(--border-subtle) !important;
+        background: rgba(128,128,128,0.08) !important;
+        border: 1px solid var(--border-color) !important;
         border-radius: 10px !important;
         padding: 0.4rem 0.85rem !important;
         width: fit-content !important;
@@ -86,7 +133,7 @@ st.markdown("""
         background: transparent !important;
     }
 
-    /* Compact stacked buttons (survey options) */
+    /* Survey option buttons */
     [data-testid="stVerticalBlock"] > [data-testid="stVerticalBlock"] {
         gap: 0.25rem !important;
     }
@@ -96,7 +143,7 @@ st.markdown("""
         font-weight: 500 !important;
         text-align: left !important;
         padding: 0.4rem 1rem !important;
-        border: 1px solid var(--border-subtle) !important;
+        border: 1px solid var(--border-color) !important;
         border-radius: 6px !important;
         transition: all 0.15s ease !important;
         white-space: normal !important;
@@ -113,7 +160,7 @@ st.markdown("""
         font-size: 0.9rem !important;
     }
 
-    /* ── Gold chat input bar ── */
+    /* Gold chat input */
     [data-testid="stChatInput"] > div {
         border-color: var(--accent-gold) !important;
         box-shadow: 0 0 0 1px var(--accent-gold) !important;
@@ -122,63 +169,53 @@ st.markdown("""
         border-color: var(--accent-gold) !important;
         box-shadow: 0 0 0 2px rgba(201,162,78,0.45) !important;
     }
-    [data-testid="stChatInputTextArea"] {
-        caret-color: var(--accent-gold) !important;
-    }
-    [data-testid="stChatInputSubmitButton"] button {
-        color: var(--accent-gold) !important;
-    }
+    [data-testid="stChatInputTextArea"] { caret-color: var(--accent-gold) !important; }
+    [data-testid="stChatInputSubmitButton"] button { color: var(--accent-gold) !important; }
 
-    /* Portfolio card inside chat */
+    /* ── Portfolio card ── */
     .portfolio-card {
-        border: 1px solid var(--border-subtle);
-        border-radius: 10px; padding: 1.5rem;
-        margin: 0.75rem 0;
+        border: 1px solid var(--border-color);
+        border-radius: 10px; padding: 1.5rem; margin: 0.75rem 0;
+        background: var(--card-bg);
     }
     .portfolio-card h3 {
         font-family: 'JetBrains Mono', monospace;
         font-size: 0.7rem; font-weight: 600; letter-spacing: 0.1em;
-        text-transform: uppercase; color: var(--accent-gold);
-        margin: 0 0 1rem 0;
+        text-transform: uppercase; color: var(--accent-gold); margin: 0 0 1rem 0;
     }
-    .portfolio-metrics {
-        display: flex; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;
-    }
+    .portfolio-metrics { display: flex; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; }
     .pm-item {
         flex: 1; min-width: 100px; padding: 0.6rem 0.8rem;
-        border: 1px solid var(--border-subtle); border-radius: 6px;
+        border: 1px solid var(--border-color); border-radius: 6px; background: var(--card-bg);
     }
     .pm-label {
         font-size: 0.65rem; font-weight: 600; letter-spacing: 0.08em;
         text-transform: uppercase; color: var(--text-muted); margin-bottom: 0.15rem;
     }
     .pm-value {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 1rem; font-weight: 600; color: var(--text-primary);
+        font-family: 'JetBrains Mono', monospace; font-size: 1rem; font-weight: 600;
+        /* No explicit color — inherits from Streamlit theme (works in light + dark) */
     }
     .pm-value.gold { color: var(--accent-gold); }
 
     .alloc-table { width: 100%; margin-top: 0.5rem; }
     .alloc-table-row {
         display: flex; justify-content: space-between; align-items: center;
-        padding: 0.5rem 0; border-bottom: 1px solid var(--border-subtle);
+        padding: 0.5rem 0; border-bottom: 1px solid var(--border-color);
     }
     .alloc-table-row:last-child { border-bottom: none; }
     .at-ticker {
-        font-family: 'JetBrains Mono', monospace;
-        font-weight: 600; font-size: 0.85rem; color: var(--text-primary);
+        font-family: 'JetBrains Mono', monospace; font-weight: 600; font-size: 0.85rem;
+        /* Inherits theme color */
     }
     .at-bar-container {
         flex: 1; margin: 0 1rem; height: 4px;
-        background: var(--border-subtle); border-radius: 2px; overflow: hidden;
+        background: var(--border-color); border-radius: 2px; overflow: hidden;
     }
-    .at-bar {
-        height: 100%; background: var(--accent-gold); border-radius: 2px;
-    }
+    .at-bar { height: 100%; background: var(--accent-gold); border-radius: 2px; }
     .at-pct {
         font-family: 'JetBrains Mono', monospace;
-        font-size: 0.8rem; color: var(--accent-gold); min-width: 45px;
-        text-align: right;
+        font-size: 0.8rem; color: var(--accent-gold); min-width: 45px; text-align: right;
     }
 
     /* Typing indicator */
@@ -194,38 +231,18 @@ st.markdown("""
         40% { opacity: 1; }
     }
 
-    /* Subtle helper text */
     .input-hint {
         font-size: 0.78rem; color: var(--text-muted);
         margin-top: -0.5rem; margin-bottom: 0.5rem;
     }
 
-    /* Start button */
-    .start-section { text-align: center; padding: 3rem 0 1rem 0; }
-    .start-section h1 {
-        font-size: 1.8rem; font-weight: 700;
-        color: var(--text-primary); margin-bottom: 0.5rem;
-    }
-    .start-section p {
-        font-size: 1rem; color: var(--text-secondary);
-        line-height: 1.6; max-width: 460px; margin: 0 auto 2rem auto;
-    }
-
-    /* ── Pipeline status stages ── */
+    /* ── Pipeline status ── */
     .pipeline-stage {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 0.7rem;
-        color: var(--text-muted);
-        padding: 0.15rem 0;
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
+        font-family: 'JetBrains Mono', monospace; font-size: 0.7rem;
+        color: var(--text-muted); padding: 0.15rem 0;
+        display: flex; align-items: center; gap: 0.5rem;
     }
-    .pipeline-dot {
-        width: 5px; height: 5px;
-        border-radius: 50%;
-        flex-shrink: 0;
-    }
+    .pipeline-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
     .pipeline-dot.done { background: var(--accent-gold); }
     .pipeline-dot.active {
         background: var(--text-muted);
@@ -236,6 +253,151 @@ st.markdown("""
         50% { opacity: 1; transform: scale(1.3); }
     }
     .pipeline-block { padding: 0.4rem 0; }
+
+    /* ── Landing page ── */
+    .landing-hero { padding: 0; }
+    .landing-badge {
+        display: inline-block;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase;
+        color: var(--accent-gold); border: 1px solid rgba(201,162,78,0.45);
+        border-radius: 20px; padding: 0.3rem 1rem; margin-bottom: 0.7rem;
+    }
+    .landing-title {
+        font-size: 2.75rem; font-weight: 700; line-height: 1.1; margin: 0 0 0.6rem 0;
+    }
+    .landing-sub {
+        font-size: 1rem; line-height: 1.6; color: var(--text-muted); display: block;
+    }
+    /* Stats bar — shown below hero */
+    .stats-bar {
+        display: flex; align-items: center; justify-content: center;
+        gap: 0; margin: 2rem 0 0 0;
+    }
+    .stat-item { text-align: center; padding: 0 2rem; }
+    .stat-item + .stat-item { border-left: 1px solid var(--border-color); }
+    .stat-value {
+        font-family: 'JetBrains Mono', monospace; font-size: 1.6rem; font-weight: 600;
+        color: var(--accent-gold);
+    }
+    .stat-label { font-size: 0.82rem; color: var(--text-muted); margin-top: 0.2rem; }
+    /* Divider */
+    .landing-divider { height: 1px; background: var(--border-color); margin: 2.5rem 0; }
+    .landing-section-label {
+        font-family: 'JetBrains Mono', monospace; font-size: 1.1rem;
+        font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;
+        color: var(--accent-gold); margin-bottom: 1.5rem;
+    }
+    /* How it works — 3 horizontal cards */
+    .steps-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1.25rem; }
+    .step-card {
+        padding: 1.6rem 1.5rem; border: 1px solid var(--border-color);
+        border-radius: 8px; background: var(--card-bg);
+    }
+    .step-num {
+        font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; font-weight: 600;
+        color: var(--accent-gold); opacity: 0.8; margin-bottom: 0.75rem;
+    }
+    .step-title { font-size: 1rem; font-weight: 600; margin-bottom: 0.45rem; }
+    .step-desc { font-size: 0.88rem; color: var(--text-muted); line-height: 1.55; }
+    /* Strategies — 4-column grid */
+    .strategies-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 1rem; }
+    .strategy-card {
+        padding: 1.1rem 1.2rem; border: 1px solid var(--border-color);
+        border-radius: 8px; background: var(--card-bg);
+    }
+    .strategy-name { font-size: 0.92rem; font-weight: 600; margin-bottom: 0.35rem; }
+    .strategy-desc { font-size: 0.8rem; color: var(--text-muted); line-height: 1.45; margin-bottom: 0.65rem; }
+    .strategy-risk {
+        display: inline-block; font-family: 'JetBrains Mono', monospace;
+        font-size: 0.65rem; font-weight: 600; letter-spacing: 0.08em;
+        text-transform: uppercase; padding: 0.18rem 0.55rem; border-radius: 3px;
+    }
+    .risk-conservative { background: rgba(16,185,129,0.12); color: #10b981; }
+    .risk-moderate     { background: rgba(59,130,246,0.12); color: #3b82f6; }
+    .risk-balanced     { background: rgba(139,92,246,0.12); color: #8b5cf6; }
+    .risk-growth       { background: rgba(245,158,11,0.12); color: #f59e0b; }
+    .risk-aggressive   { background: rgba(239,68,68,0.12);  color: #ef4444; }
+    /* Disclaimer */
+    .landing-disclaimer {
+        font-size: 0.78rem; color: var(--text-muted); text-align: center;
+        padding-top: 1.5rem; border-top: 1px solid var(--border-color);
+        line-height: 1.6; margin-bottom: 2.5rem;
+    }
+
+    /* ── Hero section: self-contained split background ── */
+    .hero-section {
+        position: relative;
+        padding: 0;
+        min-height: 400px;
+        display: flex;
+        align-items: flex-start;
+    }
+    .hero-section::before {
+        content: '';
+        position: absolute; top: 0; bottom: 0;
+        left: -200vw; right: 40%;
+        background: #0d1b2e;
+        z-index: 0;
+    }
+    .hero-section::after {
+        content: '';
+        position: absolute; top: 0; bottom: 0;
+        left: 60%; right: -200vw;
+        background: #091320;
+        z-index: 0;
+    }
+    .hero-inner {
+        position: relative; z-index: 1;
+        display: flex; gap: 0; align-items: center;
+        width: 100%;
+    }
+    .hero-left { flex: 0 0 60%; padding-right: 5rem; padding-top: 9vh; }
+    .hero-right {
+        flex: 0 0 40%; position: relative;
+        overflow: hidden; min-height: 280px;
+        display: flex; align-items: flex-start; justify-content: center;
+        padding-top: 9vh;
+    }
+    .hero-section .landing-title { color: #ffffff; }
+    .hero-section .landing-sub {
+        color: rgba(255,255,255,0.7);
+    }
+    .hero-cta-btn, .hero-cta-btn:link, .hero-cta-btn:visited {
+        display: inline-block;
+        background: var(--accent-gold); color: #ffffff !important;
+        font-family: 'DM Sans', sans-serif;
+        font-weight: 700; font-size: 0.95rem;
+        padding: 0.75rem 2.2rem; border-radius: 6px;
+        text-decoration: none !important; margin-top: 1rem;
+        cursor: pointer; transition: background 0.15s ease;
+        letter-spacing: 0.01em;
+    }
+    .hero-cta-btn:hover { background: #d4b06a; color: #ffffff !important; text-decoration: none !important; }
+
+    /* ── Hero right: chart decoration ── */
+    .hero-svg {
+        width: min(420px, 92%);
+        height: auto;
+        flex-shrink: 0;
+    }
+
+    /* ── Stats bar: full-width black section ── */
+    .landing-stats-dark {
+        position: relative;
+        padding: 2.75rem 0;
+    }
+    .landing-stats-dark::before {
+        content: '';
+        position: absolute; top: 0; bottom: 0;
+        left: -200vw; right: -200vw;
+        background: #080808;
+        z-index: 0;
+    }
+    .landing-stats-dark .stats-bar { position: relative; z-index: 1; margin: 0; }
+    .landing-stats-dark .stat-label { color: #9ca3af !important; }
+    .landing-stats-dark .stat-value { font-size: 1.8rem; }
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -473,9 +635,25 @@ SURVEY_LABELS = {
 
 def brand():
     st.markdown(
-        '<div class="brand-bar">◆ <span>Your Robo-Advisor</span> · An AI-powered tailored portfolio built just for you.</div>',
+        '<div class="brand-bar">'
+        '<span><span class="brand-name">Your Robo-Advisor</span> | Intelligent Portfolio Management</span>'
+        '</div>',
         unsafe_allow_html=True,
     )
+    components.html("""<script>
+(function() {
+    var doc = window.parent.document;
+    function fitHero() {
+        var bar = doc.querySelector('.brand-bar');
+        var hero = doc.querySelector('.hero-section');
+        if (bar && hero) {
+            hero.style.minHeight = (window.parent.innerHeight - bar.offsetHeight - 38) + 'px';
+        }
+    }
+    fitHero();
+    window.parent.addEventListener('resize', fitHero);
+})();
+</script>""", height=0)
 
 
 def autofocus_input():
@@ -484,9 +662,15 @@ def autofocus_input():
         <script>
             (function() {
                 var doc = window.parent.document;
+                // Scroll to bottom immediately — mirrors button-question behaviour,
+                // which pre-empts Streamlit's post-render animated sweep.
+                var mainEl = doc.querySelector('section[data-testid="stMain"]')
+                           || doc.querySelector('section.main')
+                           || doc.querySelector('.main');
+                if (mainEl) mainEl.scrollTop = mainEl.scrollHeight;
                 function focus() {
                     var el = doc.querySelector('textarea[data-testid="stChatInputTextArea"]');
-                    if (el) { el.focus(); return true; }
+                    if (el) { el.focus({ preventScroll: true }); return true; }
                     return false;
                 }
                 if (!focus()) {
@@ -730,6 +914,12 @@ def advance_to_next_question():
         add_assistant(q["message"])
 
 
+def _no_debt(value: str) -> bool:
+    """Return True if the answer indicates zero debt."""
+    s = value.strip().lower().replace("$", "").replace(",", "").replace(" ", "")
+    return s in {"none", "no", "n/a", "na", "0", "0.0", "nil", "nothing", "zero", "nope", "not any", "0debt"}
+
+
 def record_answer(value: str):
     """Record answer, advance step, add next question or trigger processing."""
     step = st.session_state.step
@@ -738,6 +928,11 @@ def record_answer(value: str):
     add_user(value)
     st.session_state.answers[q["key"]] = value
     st.session_state.step += 1
+
+    # Skip debt_details when user has no debt
+    if q["key"] == "total_debt" and _no_debt(value):
+        st.session_state.answers["debt_details"] = "none"
+        st.session_state.step += 1
 
     if st.session_state.step >= TOTAL:
         st.session_state.phase = "processing"
@@ -775,33 +970,206 @@ def build_followup_context(current: str) -> str:
 # ── Render ──────────────────────────────────────────────────────────────────
 
 def main():
+    # Inject sentinel for non-welcome phases — triggers CSS to constrain block-container width
+    if st.session_state.phase != "welcome":
+        st.markdown('<div id="chat-mode"></div>', unsafe_allow_html=True)
+        # Scroll to bottom before messages render so the typing animation is
+        # visible from the start (rerun resets scroll to top by default).
+        # Multiple retries handle the async gap between Python execution and
+        # the browser actually having painted the content.
+        components.html("""
+            <script>
+            (function() {
+                var doc = window.parent.document;
+                function scrollBottom() {
+                    var el = doc.querySelector('section[data-testid="stMain"]')
+                           || doc.querySelector('.main');
+                    if (el) el.scrollTop = el.scrollHeight;
+                }
+                scrollBottom();
+                setTimeout(scrollBottom, 100);
+                setTimeout(scrollBottom, 300);
+                setTimeout(scrollBottom, 600);
+            })();
+            </script>
+        """, height=0)
+
     brand()
 
     # ── Welcome state ──
     if st.session_state.phase == "welcome":
-        welcome = st.empty()
-        with welcome.container():
-            st.markdown("")
-            st.markdown(
-                '<div class="start-section">'
-                "<h1>Your Portfolio, Optimized.</h1>"
-                "<p>I'll ask you a few questions about your financial situation, "
-                "goals, and risk tolerance, then build a personalized, "
-                "quantitatively optimized portfolio for you.</p>"
-                "</div>",
-                unsafe_allow_html=True,
-            )
-            _, col_c, _ = st.columns([1, 1, 1])
-            with col_c:
-                clicked = st.button("Let's get started →", width='stretch', type="primary")
-
-        if clicked:
-            welcome.empty()
+        # Detect "Get started" click — set by the hero HTML button via query param
+        if st.query_params.get("started"):
+            st.query_params.clear()
             st.session_state.phase = "survey"
             st.session_state.step = 0
             add_assistant("Great, let's build your portfolio. I'll walk you through a few questions — it should take about 3–5 minutes.")
             advance_to_next_question()
             st.rerun()
+            return
+
+        welcome = st.empty()
+        with welcome.container():
+            # ── Hero: self-contained 65/35 split, backgrounds via CSS pseudo-elements ──
+            st.markdown("""
+<div class="hero-section">
+    <div class="hero-inner">
+        <div class="hero-left">
+            <div class="landing-badge">Intelligent &middot; Quantitative &middot; Dynamic</div>
+            <h1 class="landing-title">Your Portfolio,<br>Optimized.</h1>
+            <p class="landing-sub">
+                Our systematic assessment aligns your goals with a bespoke,<br>
+                quantitatively optimized portfolio driven by rigorous real-time market data.
+            </p>
+            <a href="?started=1" target="_self" onclick="window.location.href='?started=1'; return false;" class="hero-cta-btn">Get started →</a>
+        </div>
+        <div class="hero-right">
+            <svg class="hero-svg" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                    <linearGradient id="af" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stop-color="rgba(201,162,78,0.20)"/>
+                        <stop offset="100%" stop-color="rgba(201,162,78,0)"/>
+                    </linearGradient>
+                </defs>
+                <line x1="35" y1="82" x2="35" y2="332" stroke="rgba(201,162,78,0.22)" stroke-width="1"/>
+                <line x1="35" y1="332" x2="378" y2="332" stroke="rgba(201,162,78,0.22)" stroke-width="1"/>
+                <line x1="29" y1="122" x2="35" y2="122" stroke="rgba(201,162,78,0.38)" stroke-width="1"/>
+                <line x1="29" y1="172" x2="35" y2="172" stroke="rgba(201,162,78,0.28)" stroke-width="1"/>
+                <line x1="29" y1="222" x2="35" y2="222" stroke="rgba(201,162,78,0.28)" stroke-width="1"/>
+                <line x1="29" y1="272" x2="35" y2="272" stroke="rgba(201,162,78,0.28)" stroke-width="1"/>
+                <line x1="115" y1="332" x2="115" y2="338" stroke="rgba(201,162,78,0.32)" stroke-width="1"/>
+                <line x1="200" y1="332" x2="200" y2="338" stroke="rgba(201,162,78,0.32)" stroke-width="1"/>
+                <line x1="285" y1="332" x2="285" y2="338" stroke="rgba(201,162,78,0.32)" stroke-width="1"/>
+                <line x1="368" y1="332" x2="368" y2="338" stroke="rgba(201,162,78,0.32)" stroke-width="1"/>
+                <line x1="35" y1="344" x2="378" y2="344" stroke="rgba(201,162,78,0.10)" stroke-width="1"/>
+                <rect x="44"  y="367" width="7" height="13" fill="rgba(201,162,78,0.18)"/>
+                <rect x="82"  y="361" width="7" height="19" fill="rgba(201,162,78,0.18)"/>
+                <rect x="119" y="356" width="7" height="24" fill="rgba(201,162,78,0.22)"/>
+                <rect x="156" y="363" width="7" height="17" fill="rgba(201,162,78,0.18)"/>
+                <rect x="193" y="351" width="7" height="29" fill="rgba(201,162,78,0.26)"/>
+                <rect x="231" y="358" width="7" height="22" fill="rgba(201,162,78,0.20)"/>
+                <rect x="268" y="354" width="7" height="26" fill="rgba(201,162,78,0.22)"/>
+                <rect x="306" y="346" width="7" height="34" fill="rgba(201,162,78,0.30)"/>
+                <rect x="348" y="348" width="7" height="32" fill="rgba(201,162,78,0.28)"/>
+                <path d="M 35,308 C 75,290 95,262 115,270 S 150,285 165,278 S 205,230 225,222 S 268,196 285,188 S 318,148 338,140 S 358,102 368,90 L 368,332 L 35,332 Z" fill="url(#af)"/>
+                <path d="M 35,318 C 85,306 130,285 165,278 C 200,270 220,248 248,234 C 275,220 305,198 335,174 S 362,150 368,134" stroke="rgba(201,162,78,0.30)" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+                <path d="M 35,308 C 75,290 95,262 115,270 S 150,285 165,278 S 205,230 225,222 S 268,196 285,188 S 318,148 338,140 S 358,102 368,90" stroke="rgba(201,162,78,0.90)" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="115" cy="270" r="2.5" fill="rgba(201,162,78,0.55)"/>
+                <circle cx="225" cy="222" r="2.5" fill="rgba(201,162,78,0.68)"/>
+                <circle cx="338" cy="140" r="2.5" fill="rgba(201,162,78,0.78)"/>
+                <line x1="35" y1="90" x2="356" y2="90" stroke="rgba(201,162,78,0.12)" stroke-width="1" stroke-dasharray="4,4"/>
+                <circle cx="368" cy="90" r="5" fill="rgba(201,162,78,0.95)"/>
+                <circle cx="368" cy="90" r="10" stroke="rgba(201,162,78,0.28)" stroke-width="1" fill="none"/>
+            </svg>
+        </div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+            # ── Stats bar: full-width black background ──
+            st.markdown("""
+<div class="landing-stats-dark">
+<div class="stats-bar">
+    <div class="stat-item">
+        <div class="stat-value">22</div>
+        <div class="stat-label">questions</div>
+    </div>
+    <div class="stat-item">
+        <div class="stat-value">8</div>
+        <div class="stat-label">strategies</div>
+    </div>
+    <div class="stat-item">
+        <div class="stat-value">50+</div>
+        <div class="stat-label">securities</div>
+    </div>
+    <div class="stat-item">
+        <div class="stat-value">~5</div>
+        <div class="stat-label">minutes</div>
+    </div>
+</div>
+</div>
+""", unsafe_allow_html=True)
+
+            # ── How it works + Strategies + Disclaimer ──
+            st.markdown("""
+<div class="landing-content">
+<div class="landing-divider"></div>
+
+<div class="landing-section-label">How it works</div>
+<div class="steps-grid">
+    <div class="step-card">
+        <div class="step-num">01</div>
+        <div class="step-title">Complete your profile</div>
+        <div class="step-desc">22 questions covering income, goals, risk comfort, and investment preferences.</div>
+    </div>
+    <div class="step-card">
+        <div class="step-num">02</div>
+        <div class="step-title">AI analysis &amp; optimization</div>
+        <div class="step-desc">We assess your risk tier, fetch live market data, select securities, and run portfolio optimization.</div>
+    </div>
+    <div class="step-card">
+        <div class="step-num">03</div>
+        <div class="step-title">Receive your portfolio</div>
+        <div class="step-desc">Optimized allocations, growth projections, a risk profile summary, and an AI advisor for follow-up questions.</div>
+    </div>
+</div>
+
+<div class="landing-divider"></div>
+
+<div class="landing-section-label">Optimization strategies</div>
+<div class="strategies-grid">
+    <div class="strategy-card">
+        <div class="strategy-name">Minimum Variance</div>
+        <div class="strategy-desc">Minimize portfolio volatility. Prioritizes capital preservation.</div>
+        <span class="strategy-risk risk-conservative">Conservative</span>
+    </div>
+    <div class="strategy-card">
+        <div class="strategy-name">Equal Risk Contribution</div>
+        <div class="strategy-desc">Each asset contributes equally to total portfolio risk.</div>
+        <span class="strategy-risk risk-moderate">Moderate</span>
+    </div>
+    <div class="strategy-card">
+        <div class="strategy-name">Robust Mean-Variance</div>
+        <div class="strategy-desc">Minimize variance while maintaining a minimum return floor.</div>
+        <span class="strategy-risk risk-balanced">Balanced</span>
+    </div>
+    <div class="strategy-card">
+        <div class="strategy-name">Market Tracking</div>
+        <div class="strategy-desc">Tracks VOO. Passive broad-market exposure with growth potential.</div>
+        <span class="strategy-risk risk-growth">Growth</span>
+    </div>
+    <div class="strategy-card">
+        <div class="strategy-name">Equally Weighted</div>
+        <div class="strategy-desc">Each asset receives an equal allocation. Simple and diversified.</div>
+        <span class="strategy-risk risk-growth">Growth</span>
+    </div>
+    <div class="strategy-card">
+        <div class="strategy-name">Max Sharpe Ratio</div>
+        <div class="strategy-desc">Maximize risk-adjusted return. Best return per unit of risk taken.</div>
+        <span class="strategy-risk risk-aggressive">Aggressive</span>
+    </div>
+    <div class="strategy-card">
+        <div class="strategy-name">Max Expected Return</div>
+        <div class="strategy-desc">Maximize expected annual return. Higher risk tolerance required.</div>
+        <span class="strategy-risk risk-aggressive">Aggressive</span>
+    </div>
+    <div class="strategy-card">
+        <div class="strategy-name">Leveraged Max Sharpe</div>
+        <div class="strategy-desc">Max Sharpe portfolio with 1.5× leverage. Maximum growth potential.</div>
+        <span class="strategy-risk risk-aggressive">Aggressive</span>
+    </div>
+</div>
+
+<div class="landing-divider"></div>
+
+<div class="landing-disclaimer">
+    AI-generated guidance for informational purposes only &mdash; not professional financial advice.
+    Consult a licensed financial advisor before making investment decisions.
+</div>
+</div>
+""", unsafe_allow_html=True)
+
+        # Navigation is handled by query param detection above (href="?started=1")
         return
 
     # ── Render all chat messages ──
@@ -907,14 +1275,20 @@ def main():
         q = QUESTIONS[st.session_state.step]
 
         if q["type"] == "options":
-            options_slot = st.empty()
+            # Sentinel div: CSS uses :has(#options-q-active) to hide the bottom
+            # bar without removing it, so the bar's height is stable across the
+            # button→text transition and Streamlit never fires a layout-shift scroll.
+            st.markdown('<div id="options-q-active"></div>', unsafe_allow_html=True)
             clicked_option = None
-            with options_slot.container():
+            bottom_ctx = st.bottom() if hasattr(st, "bottom") else st.container()
+            with bottom_ctx:
                 for i, option in enumerate(q["options"]):
                     if st.button(option, key=f"opt_{st.session_state.step}_{i}", width='stretch'):
                         clicked_option = option
+            # Dummy chat_input keeps stBottomBlockContainer in the DOM (hidden via
+            # CSS above) so its presence/absence never changes between question types.
+            st.chat_input("", key=f"_opts_{st.session_state.step}")
             if clicked_option:
-                options_slot.empty()
                 record_answer(clicked_option)
                 st.rerun()
             else:

@@ -66,8 +66,12 @@ def fetch_stock_data(tickers: list[str] | None = None) -> dict[str, dict]:
             threads=True,
         )
 
-        # Get ticker info objects
-        ticker_objs = {t: yf.Ticker(t) for t in tickers}
+        etf_tickers_set = {e["ticker"] for e in APPROVED_ETFS}
+        stock_names = {s["ticker"]: s["name"] for s in APPROVED_STOCKS}
+        etf_names = {e["ticker"]: e["name"] for e in APPROVED_ETFS}
+
+        # Only fetch .info for stocks — ETFs don't display those fields
+        stock_ticker_objs = {t: yf.Ticker(t) for t in tickers if t not in etf_tickers_set}
 
         for ticker in tickers:
             try:
@@ -96,46 +100,54 @@ def fetch_stock_data(tickers: list[str] | None = None) -> dict[str, dict]:
                 change_1m = pct_change(21)
                 change_3m = pct_change(63) if len(close) >= 64 else None
 
-                # Get info with retry on rate limit
-                info = {}
-                for attempt in range(3):
-                    try:
-                        info = ticker_objs[ticker].info
-                        break
-                    except Exception as e:
-                        if "Too Many Requests" in str(e) or "Rate" in str(e):
-                            time.sleep(2 ** attempt * 2)  # 2s, 4s, 8s backoff
-                        else:
-                            raise
-
-                # Prevent yfinance rate limiting
-                time.sleep(0.5)
-
-                # Format market cap
-                mc = info.get("marketCap", 0)
-                if mc >= 1e12:
-                    mc_str = f"{mc/1e12:.1f}T"
-                elif mc >= 1e9:
-                    mc_str = f"{mc/1e9:.1f}B"
-                elif mc >= 1e6:
-                    mc_str = f"{mc/1e6:.0f}M"
+                if ticker in etf_tickers_set:
+                    # ETFs: skip .info — use known name, no financial ratios needed
+                    data[ticker] = {
+                        "price": round(current_price, 2),
+                        "change_1d": change_1d,
+                        "change_1w": change_1w,
+                        "change_1m": change_1m,
+                        "change_3m": change_3m,
+                        "name": etf_names.get(ticker, ticker),
+                    }
                 else:
-                    mc_str = str(mc)
+                    # Stocks: fetch .info for P/E, dividend, sector, market cap
+                    info = {}
+                    for attempt in range(3):
+                        try:
+                            info = stock_ticker_objs[ticker].info
+                            break
+                        except Exception as e:
+                            if "Too Many Requests" in str(e) or "Rate" in str(e):
+                                time.sleep(2 ** attempt * 2)  # 2s, 4s, 8s backoff
+                            else:
+                                raise
 
-                data[ticker] = {
-                    "price": round(current_price, 2),
-                    "change_1d": change_1d,
-                    "change_1w": change_1w,
-                    "change_1m": change_1m,
-                    "change_3m": change_3m,
-                    "52w_high": round(float(info.get("fiftyTwoWeekHigh", 0)), 2),
-                    "52w_low": round(float(info.get("fiftyTwoWeekLow", 0)), 2),
-                    "pe_ratio": round(float(info.get("trailingPE", 0)), 1) if info.get("trailingPE") else None,
-                    "dividend_yield": round(float(info.get("dividendYield", 0)) * 100, 2) if info.get("dividendYield") else 0,
-                    "market_cap": mc_str,
-                    "sector": info.get("sector", "N/A"),
-                    "name": info.get("shortName", ticker),
-                }
+                    # Format market cap
+                    mc = info.get("marketCap", 0)
+                    if mc >= 1e12:
+                        mc_str = f"{mc/1e12:.1f}T"
+                    elif mc >= 1e9:
+                        mc_str = f"{mc/1e9:.1f}B"
+                    elif mc >= 1e6:
+                        mc_str = f"{mc/1e6:.0f}M"
+                    else:
+                        mc_str = str(mc)
+
+                    data[ticker] = {
+                        "price": round(current_price, 2),
+                        "change_1d": change_1d,
+                        "change_1w": change_1w,
+                        "change_1m": change_1m,
+                        "change_3m": change_3m,
+                        "52w_high": round(float(info.get("fiftyTwoWeekHigh", 0)), 2),
+                        "52w_low": round(float(info.get("fiftyTwoWeekLow", 0)), 2),
+                        "pe_ratio": round(float(info.get("trailingPE", 0)), 1) if info.get("trailingPE") else None,
+                        "dividend_yield": round(float(info.get("dividendYield", 0)) * 100, 2) if info.get("dividendYield") else 0,
+                        "market_cap": mc_str,
+                        "sector": info.get("sector", "N/A"),
+                        "name": info.get("shortName", stock_names.get(ticker, ticker)),
+                    }
 
             except Exception as e:
                 print(f"  Warning: Could not fetch data for {ticker}: {e}")

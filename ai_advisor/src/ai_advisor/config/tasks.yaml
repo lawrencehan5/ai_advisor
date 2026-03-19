@@ -72,11 +72,18 @@ assess_risk_task:
     {available_strategies}
 
     Match the optimization strategy to the user's profile:
-    - Conservative/low-experience users → minimum_variance or equally_weighted
-    - Moderate users → equal_risk_contribution or robust_mean_variance
-    - Balanced users → max_sharpe_ratio or robust_mean_variance
-    - Growth users → max_sharpe_ratio or max_expected_return
-    - Aggressive/experienced users → leveraged_max_sharpe or max_expected_return
+    - Conservative users → minimum_variance
+    - Moderate users → equal_risk_contribution
+    - Balanced users → robust_mean_variance
+    - Growth users → market_tracking or equally_weighted
+    - Aggressive/experienced users → max_sharpe_ratio, max_expected_return, or leveraged_max_sharpe
+
+    Additionally, apply these hard rules:
+    - If investment_style is passive → strongly prefer market_tracking or minimum_variance.
+    - If investment_style is active → prefer max_expected_return or max_sharpe_ratio.
+    - If leverage_comfort is "no" → NEVER recommend leveraged_max_sharpe.
+    - If experience is None or Beginner → avoid leveraged_max_sharpe, max_expected_return, and max_sharpe_ratio.
+    - If investment_horizon is less than 3 years → prefer minimum_variance or equal_risk_contribution.
   expected_output: >
     RISK ASSESSMENT
     ===============
@@ -113,18 +120,35 @@ present_portfolio_task:
     Investment Amount: {investment_amount}
     --- END USER CONTEXT ---
 
+    --- FINANCIAL PROFILE ---
+    {financial_profile_summary}
+    --- END FINANCIAL PROFILE ---
+
+    --- RISK ASSESSMENT ---
+    {risk_assessment_summary}
+    --- END RISK ASSESSMENT ---
+
     Your job:
-    1. Translate percentages into dollar amounts based on the investment amount.
-    2. Explain what each holding is and why the optimizer included it.
-    3. Summarize the overall portfolio characteristics (equity vs bonds, sectors, etc.).
-    4. Explain the expected risk/return in plain language.
-    5. Note any important caveats or next steps.
-    6. Include a disclaimer.
+    1. Write a concise paragraph (3-5 sentences) summarizing the user's risk profile.
+       Draw on their demographics, financial situation, investment horizon, goals, and
+       stated risk comfort. Explain what kind of investor they are and why their risk
+       category fits them.
+    2. Translate percentages into dollar amounts based on the investment amount.
+    3. Explain what each holding is and why the optimizer included it.
+    4. Summarize the overall portfolio characteristics (equity vs bonds, sectors, etc.).
+    5. Explain the expected risk/return in plain language.
+    6. Note any important caveats or next steps.
+    7. Include a disclaimer.
   expected_output: >
     PORTFOLIO RECOMMENDATION
     ========================
     Strategy: [strategy name]
     Total Investment: $[amount]
+
+    Your Risk Profile:
+    [A 3-5 sentence paragraph describing the user as an investor — their life stage,
+    financial situation, goals, investment horizon, and comfort with risk. Explain
+    why they were assigned their risk category and what that means for their portfolio.]
 
     Holdings:
       1. [TICKER] ([Name]) — [XX.X%] ($[amount]) — [what this is and why it's included]
