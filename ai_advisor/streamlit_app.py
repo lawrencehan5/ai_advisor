@@ -10,6 +10,7 @@ import base64
 import time
 import numpy as np
 from pathlib import Path
+import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
@@ -896,6 +897,91 @@ def _make_monte_carlo(
     return fig
 
 
+def _make_backtest_chart(allocations: list[dict], investment_amount: float) -> go.Figure:
+    """
+    Show how the selected portfolio would have performed over the last 3 years
+    vs the SPY benchmark, using a buy-and-hold assumption from the first
+    available date in the cache.
+    """
+    from ai_advisor.price_cache import load_prices
+    from datetime import date, timedelta
+
+    tickers = [a["ticker"] for a in allocations]
+    weights = {a["ticker"]: a["weight"] for a in allocations}
+
+    prices = load_prices(tickers + ["SPY"])
+    start_3y = date.today() - timedelta(days=3 * 365)
+    prices = prices[prices.index >= pd.Timestamp(start_3y)]
+
+    if prices.empty or len(prices) < 2:
+        return go.Figure()
+
+    available = [t for t in tickers if t in prices.columns and prices[t].notna().any()]
+    if not available:
+        return go.Figure()
+
+    total_w = sum(weights[t] for t in available)
+    w = {t: weights[t] / total_w for t in available}
+
+    # Buy-and-hold: position value = (dollars_allocated / start_price) * price(t)
+    first_prices = prices[available].bfill().iloc[0]
+    position_values = pd.DataFrame({
+        t: (w[t] * investment_amount / first_prices[t]) * prices[t]
+        for t in available
+    })
+    port_value = position_values.sum(axis=1).dropna()
+
+    spy_prices = prices["SPY"].dropna() if "SPY" in prices.columns else None
+    spy_value = None
+    if spy_prices is not None and not spy_prices.empty:
+        spy_value = investment_amount * spy_prices / spy_prices.bfill().iloc[0]
+
+    accent    = "201, 162, 78"   # gold
+    spy_color = "100, 116, 139"  # slate
+    fig = go.Figure()
+
+    if spy_value is not None:
+        fig.add_trace(go.Scatter(
+            x=spy_value.index, y=spy_value.values,
+            name="SPY (benchmark)",
+            line=dict(color=f"rgb({spy_color})", width=1.5, dash="dot"),
+        ))
+
+    fig.add_trace(go.Scatter(
+        x=port_value.index, y=port_value.values,
+        name="Your Portfolio",
+        line=dict(color=f"rgb({accent})", width=2.5),
+        fill="tozeroy",
+        fillcolor=f"rgba({accent},0.08)",
+    ))
+
+    fig.add_hline(
+        y=investment_amount, line_dash="dot",
+        line_color="gray", opacity=0.4,
+        annotation_text=f"  Initial ${investment_amount:,.0f}",
+        annotation_position="bottom right",
+    )
+
+    total_ret = (port_value.iloc[-1] - investment_amount) / investment_amount
+    fig.update_layout(
+        title=dict(
+            text=f"3-Year Historical Backtest — {total_ret:+.1%} total return",
+            font=dict(size=16),
+        ),
+        xaxis_title="Date",
+        yaxis_title="Portfolio Value ($)",
+        yaxis_tickformat="$,.0f",
+        height=400,
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        xaxis=dict(gridcolor="rgba(200,200,200,0.2)"),
+        yaxis=dict(gridcolor="rgba(200,200,200,0.2)"),
+        legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5),
+        margin=dict(l=10, r=10, t=60, b=60),
+    )
+    return fig
+
+
 def _render_charts(params: dict):
     col1, col2 = st.columns(2)
     with col1:
@@ -910,6 +996,9 @@ def _render_charts(params: dict):
             ),
             width='stretch',
         )
+    backtest_fig = _make_backtest_chart(params["allocations"], params["investment_amount"])
+    if backtest_fig.data:
+        st.plotly_chart(backtest_fig, width='stretch')
 
 
 def build_portfolio_card(result: AdvisorResult) -> str:

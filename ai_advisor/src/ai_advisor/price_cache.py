@@ -3,7 +3,7 @@ ai_advisor/price_cache.py
 
 Local parquet cache for yfinance price data.
 
-On the first run, the full 20-year history for every ticker in the approved
+On the first run, the full 3-year history for every ticker in the approved
 universe (plus SPY as the market-tracking benchmark) is downloaded and saved
 to  <project_root>/data/price_cache.parquet.
 
@@ -34,7 +34,7 @@ _PROJECT_ROOT = Path(__file__).parent.parent.parent
 _CACHE_DIR    = _PROJECT_ROOT / "data"
 _CACHE_FILE   = _CACHE_DIR / "price_cache.parquet"
 
-_YEARS_HISTORY = 20  # how many years of history to fetch on a fresh download
+_YEARS_HISTORY = 3  # how many years of history to fetch on a fresh download
 
 
 # ── Universe ─────────────────────────────────────────────────────────────────
