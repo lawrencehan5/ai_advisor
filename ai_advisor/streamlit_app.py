@@ -224,6 +224,16 @@ st.markdown("""
         font-family: 'JetBrains Mono', monospace;
         font-size: 0.8rem; color: var(--accent-gold); min-width: 45px; text-align: right;
     }
+    .at-dollars {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.75rem; color: var(--text-secondary);
+        min-width: 58px; text-align: right; margin-left: 0.5rem;
+    }
+    .at-units {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.75rem; color: var(--text-muted);
+        min-width: 62px; text-align: right;
+    }
 
     /* Typing indicator */
     .typing-dot {
@@ -943,11 +953,15 @@ def build_portfolio_card(result: AdvisorResult) -> str:
         "</p>"
     )
 
+    investment_amount = opt.metadata.get("investment_amount", 0.0)
     max_w = max((a["weight"] for a in result.allocations), default=1)
     rows = ""
     for a in result.allocations:
         pct = a["weight"] * 100
         bar_w = (a["weight"] / max_w) * 100
+        dollar_amt = a["weight"] * investment_amount
+        price = a.get("current_price", 0.0)
+        units = dollar_amt / price if price > 0 else 0.0
         rows += f"""
         <div class="alloc-table-row">
             <span class="at-ticker">{a["ticker"]}</span>
@@ -955,6 +969,8 @@ def build_portfolio_card(result: AdvisorResult) -> str:
                 <div class="at-bar" style="width:{bar_w}%"></div>
             </div>
             <span class="at-pct">{pct:.1f}%</span>
+            <span class="at-dollars">${dollar_amt:,.0f}</span>
+            <span class="at-units">{units:.4g} sh</span>
         </div>"""
 
     metrics += f'<div class="alloc-table">{rows}</div></div>'

@@ -551,8 +551,9 @@ class PortfolioOptimizer:
         After re-normalisation, clips to max_weight and renormalises once
         more to ensure the constraint is never violated by rounding.
         """
+        price_map = dict(zip(self.tickers, self.cur_prices))
         raw = [
-            {"ticker": t, "weight": float(w)}
+            {"ticker": t, "weight": float(w), "current_price": float(price_map[t])}
             for t, w in zip(self.tickers, weights)
             if float(w) >= 0.01
         ]
