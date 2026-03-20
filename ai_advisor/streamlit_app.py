@@ -6,13 +6,14 @@ Run:  streamlit run streamlit_app.py
 from dotenv import load_dotenv
 load_dotenv()
 
+import base64
 import time
 import numpy as np
 from pathlib import Path
 import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
-from ai_advisor.run_advisor import run_initial_pipeline, run_followup, AdvisorResult
+from ai_advisor.run_advisor import run_initial_pipeline, run_followup_reoptimize, AdvisorResult
 
 # ── Page Config ─────────────────────────────────────────────────────────────
 
@@ -106,6 +107,12 @@ st.markdown("""
         display: flex; align-items: center; justify-content: space-between;
     }
     .brand-name { color: var(--accent-gold); }
+    .brand-logo { height: 28px; width: auto; display: block; margin-bottom: 3px; }
+    .brand-logo-dark { display: none; }
+    @media (prefers-color-scheme: dark) {
+        .brand-logo-light { display: none; }
+        .brand-logo-dark { display: inline-block; }
+    }
 
     /* ── User messages: avatar on right ── */
     [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) {
@@ -634,9 +641,26 @@ SURVEY_LABELS = {
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
 def brand():
+    _here = Path(__file__).parent
+    _logo_light = _here / "logo_light.png"
+    _logo_dark = _here / "logo_dark.png"
+    if _logo_light.exists() and _logo_dark.exists():
+        def _b64(p):
+            return base64.b64encode(p.read_bytes()).decode()
+        light_src = f"data:image/png;base64,{_b64(_logo_light)}"
+        dark_src = f"data:image/png;base64,{_b64(_logo_dark)}"
+        brand_html = (
+            f'<img class="brand-logo brand-logo-light" src="{light_src}" alt="Your Robo-Advisor">'
+            f'<img class="brand-logo brand-logo-dark" src="{dark_src}" alt="Your Robo-Advisor">'
+        )
+    else:
+        brand_html = '<span class="brand-name">Your Robo-Advisor</span>'
     st.markdown(
         '<div class="brand-bar">'
-        '<span><span class="brand-name">Your Robo-Advisor</span> | Intelligent Portfolio Management</span>'
+        f'<span style="display:inline-flex;align-items:flex-end;gap:0.5em;">'
+        f'{brand_html}'
+        f'<span> | Intelligent Portfolio Management</span>'
+        f'</span>'
         '</div>',
         unsafe_allow_html=True,
     )
@@ -1176,7 +1200,7 @@ def main():
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             if msg.get("is_charts"):
-                params = st.session_state.get("chart_params")
+                params = msg.get("chart_params") or st.session_state.get("chart_params")
                 if params:
                     _render_charts(params)
             elif msg.get("is_html"):
@@ -1248,16 +1272,18 @@ def main():
 
         # Store chart parameters and add charts sentinel message
         opt = result.optimization_result
-        st.session_state.chart_params = {
+        _chart_params = {
             "allocations": result.allocations,
             "expected_return": opt.expected_return,
             "expected_volatility": opt.expected_volatility,
             "investment_amount": opt.metadata.get("investment_amount", 10000.0),
             "investment_horizon": opt.metadata.get("investment_horizon", "5-10yr"),
         }
+        st.session_state.chart_params = _chart_params
         st.session_state.messages.append({
             "role": "assistant",
             "is_charts": True,
+            "chart_params": _chart_params,
         })
 
         # Text recommendation
@@ -1322,20 +1348,87 @@ def main():
             with st.chat_message("user"):
                 st.markdown(prompt)
 
-            with st.chat_message("assistant"):
-                with st.spinner(""):
-                    try:
-                        context = build_followup_context(prompt)
-                        answer = run_followup(context, st.session_state.advisor_result)
-                    except Exception as e:
-                        answer = f"I ran into an error: {e}"
-                st.write_stream(typing_generator(answer))
+            # Live pipeline-stage display during any re-optimization
+            progress_placeholder = st.empty()
+            completed_stages = []
+            current_stage = [None]
 
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": answer,
-                "animated": False,
-            })
+            def _on_followup_progress(stage_label: str):
+                if current_stage[0]:
+                    completed_stages.append(current_stage[0])
+                current_stage[0] = stage_label
+                progress_placeholder.markdown(
+                    build_stages_html(completed_stages, current_stage[0]),
+                    unsafe_allow_html=True,
+                )
+
+            try:
+                context = build_followup_context(prompt)
+                answer, new_result = run_followup_reoptimize(
+                    prompt, context, st.session_state.advisor_result,
+                    on_progress=_on_followup_progress,
+                )
+            except Exception as e:
+                answer = f"I ran into an error: {e}"
+                new_result = None
+
+            # Finalise stage list and clear the live placeholder
+            if current_stage[0]:
+                completed_stages.append(current_stage[0])
+                current_stage[0] = None
+            progress_placeholder.empty()
+
+            if new_result is not None:
+                # ── Re-optimization occurred: persist stages, new card, new charts ──
+                st.session_state.advisor_result = new_result
+
+                if completed_stages:
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": build_stages_html(completed_stages),
+                        "is_html": True,
+                        "animated": False,
+                    })
+
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": build_portfolio_card(new_result),
+                    "is_html": True,
+                    "is_result": True,
+                    "animated": False,
+                })
+
+                opt = new_result.optimization_result
+                _new_chart_params = {
+                    "allocations": new_result.allocations,
+                    "expected_return": opt.expected_return,
+                    "expected_volatility": opt.expected_volatility,
+                    "investment_amount": opt.metadata.get("investment_amount", 10000.0),
+                    "investment_horizon": st.session_state.get("chart_params", {}).get(
+                        "investment_horizon", "5-10yr"
+                    ),
+                }
+                st.session_state.chart_params = _new_chart_params
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "is_charts": True,
+                    "chart_params": _new_chart_params,
+                    "animated": False,
+                })
+
+                # Queue answer as animated; rerun renders everything in order
+                add_assistant(answer)
+                st.rerun()
+            else:
+                # ── Simple follow-up: stream answer directly ──
+                with st.chat_message("assistant"):
+                    st.write_stream(typing_generator(answer))
+
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": answer,
+                    "animated": False,
+                })
         else:
             autofocus_input()
 

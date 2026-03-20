@@ -254,6 +254,120 @@ def _format_optimizer_allocations(opt_result: OptimizationResult) -> str:
     return "\n".join(lines)
 
 
+def _run_presentation(
+    opt_result: OptimizationResult,
+    risk_category: str,
+    investment_amount: float,
+    profile_text: str,
+    risk_text: str,
+    excluded_tickers: list[str],
+    included_tickers: list[str],
+    market_context: str = "",
+) -> str:
+    """Run the presentation CrewAI agent and return the recommendation text."""
+    advisor = AiAdvisor()
+    full_crew = advisor.crew()
+    presentation_crew = Crew(
+        agents=[full_crew.agents[2]],
+        tasks=[full_crew.tasks[2]],
+        process=Process.sequential,
+        verbose=True,
+    )
+
+    constraint_lines = []
+    if excluded_tickers:
+        constraint_lines.append(f"Excluded tickers (per user request): {', '.join(excluded_tickers)}")
+    if included_tickers:
+        constraint_lines.append(f"User-preferred tickers: {', '.join(included_tickers)}")
+    constraints_text = "\n".join(constraint_lines) if constraint_lines else "None"
+
+    alloc_text = _format_optimizer_allocations(opt_result)
+    if constraint_lines:
+        alloc_text += f"\n\n  User Constraints Applied:\n  " + "\n  ".join(constraint_lines)
+    if market_context:
+        alloc_text += f"\n\n{market_context}"
+
+    presentation_inputs = {
+        "survey_responses": "",
+        "available_strategies": "",
+        "approved_securities": "",
+        "optimizer_strategy": opt_result.strategy_display_name,
+        "expected_return": f"{opt_result.expected_return:.1%}",
+        "expected_volatility": f"{opt_result.expected_volatility:.1%}",
+        "sharpe_ratio": f"{opt_result.sharpe_ratio:.2f}",
+        "optimizer_allocations": alloc_text,
+        "risk_category": risk_category,
+        "investment_amount": f"${investment_amount:,.0f}",
+        "user_constraints": constraints_text,
+        "financial_profile_summary": profile_text,
+        "risk_assessment_summary": risk_text,
+    }
+
+    result = presentation_crew.kickoff(inputs=presentation_inputs)
+    return str(presentation_crew.tasks[0].output) if presentation_crew.tasks[0].output else str(result)
+
+
+def _detect_portfolio_change(raw_question: str, advisor_result: "AdvisorResult") -> dict:
+    """
+    Use GPT to detect if a follow-up question requires re-optimization.
+    Returns dict with: needs_reoptimize, new_strategy, add_tickers, remove_tickers.
+    """
+    strategy_keys = list(STRATEGIES.keys())
+    all_tickers = get_all_tickers()
+    current_tickers = [a["ticker"] for a in advisor_result.allocations]
+
+    response = client.chat.completions.create(
+        model=EXTRACTION_MODEL,
+        temperature=0,
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You analyze financial advisor follow-up questions to determine if portfolio re-optimization is needed.\n\n"
+                    f"Current strategy: {advisor_result.optimizer_strategy}\n"
+                    f"Current tickers: {', '.join(current_tickers)}\n"
+                    f"Valid strategies: {', '.join(strategy_keys)}\n"
+                    f"Known tickers: {', '.join(all_tickers)}\n\n"
+                    "Re-optimization IS needed when the user:\n"
+                    "- Wants to switch to a different optimization strategy\n"
+                    "- Wants to add specific new stocks/ETFs to the portfolio\n"
+                    "- Wants to remove/exclude specific stocks/ETFs\n"
+                    "- Asks to rebuild the portfolio with a different risk level or style\n"
+                    "- Says things like 'redo this with X', 'show me a version with Y', 'build me a more aggressive portfolio'\n\n"
+                    "Re-optimization is NOT needed when the user:\n"
+                    "- Asks explanatory questions about the existing portfolio ('why did you pick X?')\n"
+                    "- Asks about market conditions or general financial concepts\n"
+                    "- Asks 'what if' questions without asking for a new portfolio\n\n"
+                    "Return ONLY valid JSON:\n"
+                    '{\n'
+                    '  "needs_reoptimize": <true/false>,\n'
+                    '  "new_strategy": <strategy key string if user wants a different strategy, else null>,\n'
+                    '  "add_tickers": [<specific ticker symbols the user wants added>],\n'
+                    '  "remove_tickers": [<specific ticker symbols the user wants removed/excluded>]\n'
+                    '}'
+                ),
+            },
+            {"role": "user", "content": raw_question},
+        ],
+    )
+
+    raw = response.choices[0].message.content.strip()
+    raw = re.sub(r'^```(?:json)?\s*', '', raw)
+    raw = re.sub(r'\s*```$', '', raw)
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        data = {}
+
+    return {
+        "needs_reoptimize": bool(data.get("needs_reoptimize", False)),
+        "new_strategy": data.get("new_strategy") or None,
+        "add_tickers": [t.upper() for t in data.get("add_tickers", [])],
+        "remove_tickers": [t.upper() for t in data.get("remove_tickers", [])],
+    }
+
+
 # ── Pipeline Runner ─────────────────────────────────────────────────────────
 
 def run_initial_pipeline(
@@ -363,50 +477,16 @@ def run_initial_pipeline(
 
     # ── Phase 3: Present results with FULL context ──────────────
     progress("Preparing your personalized recommendation")
-    advisor2 = AiAdvisor()
-    full_crew2 = advisor2.crew()
-
-    presentation_crew = Crew(
-        agents=[full_crew2.agents[2]],
-        tasks=[full_crew2.tasks[2]],
-        process=Process.sequential,
-        verbose=True,
+    portfolio_text = _run_presentation(
+        opt_result=opt_result,
+        risk_category=risk_category,
+        investment_amount=investment_amount,
+        profile_text=profile_text,
+        risk_text=risk_text,
+        excluded_tickers=excluded_tickers,
+        included_tickers=included_tickers,
+        market_context=market_context,
     )
-
-    # Build constraint summary
-    constraint_lines = []
-    if excluded_tickers:
-        constraint_lines.append(f"Excluded tickers (per user request): {', '.join(excluded_tickers)}")
-    if included_tickers:
-        constraint_lines.append(f"User-preferred tickers: {', '.join(included_tickers)}")
-    constraints_text = "\n".join(constraint_lines) if constraint_lines else "None"
-
-    alloc_text = _format_optimizer_allocations(opt_result)
-    if constraint_lines:
-        alloc_text += f"\n\n  User Constraints Applied:\n  " + "\n  ".join(constraint_lines)
-    if market_context:
-        alloc_text += f"\n\n{market_context}"
-
-    presentation_inputs = {
-        # Placeholders for tasks 1 & 2
-        "survey_responses": "",
-        "available_strategies": "",
-        "approved_securities": "",
-        # Actual values
-        "optimizer_strategy": opt_result.strategy_display_name,
-        "expected_return": f"{opt_result.expected_return:.1%}",
-        "expected_volatility": f"{opt_result.expected_volatility:.1%}",
-        "sharpe_ratio": f"{opt_result.sharpe_ratio:.2f}",
-        "optimizer_allocations": alloc_text,
-        "risk_category": risk_category,
-        "investment_amount": f"${investment_amount:,.0f}",
-        "user_constraints": constraints_text,
-        "financial_profile_summary": profile_text,
-        "risk_assessment_summary": risk_text,
-    }
-
-    presentation_result = presentation_crew.kickoff(inputs=presentation_inputs)
-    portfolio_text = str(presentation_crew.tasks[0].output) if presentation_crew.tasks[0].output else str(presentation_result)
 
     return AdvisorResult(
         survey_responses=survey_responses,
@@ -502,3 +582,87 @@ def run_followup(question: str, advisor_result: AdvisorResult) -> str:
 
     result = followup_crew.kickoff()
     return str(result)
+
+
+# ── Follow-up with optional re-optimization ──────────────────────────────────
+
+def run_followup_reoptimize(
+    raw_question: str,
+    full_context: str,
+    advisor_result: AdvisorResult,
+    on_progress: callable = None,
+) -> tuple[str, "AdvisorResult | None"]:
+    """
+    Handle a follow-up question, re-running the optimization pipeline when the
+    user requests a new strategy, different tickers, or a rebuilt portfolio.
+
+    Returns (answer_text, new_advisor_result).
+    new_advisor_result is None when no re-optimization was needed.
+    """
+
+    def progress(msg: str):
+        print(f"  {msg}")
+        if on_progress:
+            on_progress(msg)
+
+    # Detect whether the question requires re-optimization
+    change = _detect_portfolio_change(raw_question, advisor_result)
+
+    if not change["needs_reoptimize"]:
+        answer = run_followup(full_context, advisor_result)
+        return answer, None
+
+    # ── Re-optimization path ─────────────────────────────────────
+    progress("Analyzing your request")
+
+    # Merge existing constraints with any new add/remove requests
+    excluded = list(set(advisor_result.excluded_tickers) | set(change["remove_tickers"]))
+    included = list(set(advisor_result.included_tickers) | set(change["add_tickers"]))
+
+    progress("Selecting stocks and ETFs using current market data")
+    new_tickers = _select_tickers_with_ai(
+        risk_category=advisor_result.risk_category,
+        excluded_tickers=excluded,
+        included_tickers=included,
+        profile_text=advisor_result.financial_profile,
+        risk_text=advisor_result.risk_assessment,
+        market_context=advisor_result.market_context,
+    )
+
+    strategy_key = change["new_strategy"] or advisor_result.optimizer_strategy
+    strategy = select_strategy(advisor_result.risk_category, strategy_key)
+    investment_amount = advisor_result.optimization_result.metadata.get("investment_amount", 10000.0)
+
+    progress(f"Optimizing portfolio weights ({strategy.replace('_', ' ')})")
+    opt_result = run_optimization(strategy, new_tickers, investment_amount)
+
+    progress("Preparing your updated recommendation")
+    portfolio_text = _run_presentation(
+        opt_result=opt_result,
+        risk_category=advisor_result.risk_category,
+        investment_amount=investment_amount,
+        profile_text=advisor_result.financial_profile,
+        risk_text=advisor_result.risk_assessment,
+        excluded_tickers=excluded,
+        included_tickers=included,
+        market_context=advisor_result.market_context,
+    )
+
+    new_result = AdvisorResult(
+        survey_responses=advisor_result.survey_responses,
+        financial_profile=advisor_result.financial_profile,
+        risk_assessment=advisor_result.risk_assessment,
+        risk_category=advisor_result.risk_category,
+        risk_score=advisor_result.risk_score,
+        optimizer_strategy=strategy,
+        optimization_result=opt_result,
+        portfolio_recommendation=portfolio_text,
+        allocations=opt_result.allocations,
+        excluded_tickers=excluded,
+        included_tickers=included,
+        market_context=advisor_result.market_context,
+    )
+
+    # Answer the user's question using the newly optimized context
+    answer = run_followup(full_context, new_result)
+    return answer, new_result
