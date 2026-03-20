@@ -277,23 +277,76 @@ def _get_risk_free_rate() -> float:
 
 # ── Black-Litterman Return Estimation ───────────────────────────────────────
 
-def _black_litterman_mu(Q: np.ndarray, rf: float) -> np.ndarray:
+_MARKET_CAP_CACHE: dict[str, float] = {}
+
+
+def _get_market_weights(tickers: list[str]) -> np.ndarray:
+    """
+    Fetch market cap (stocks) or AUM (ETFs) for each ticker via yfinance and
+    return a weight vector summing to 1.
+
+    Data source:
+      - Stocks: yf.Ticker(t).info["marketCap"]
+      - ETFs:   yf.Ticker(t).info["totalAssets"]  (AUM)
+
+    Cached per ticker for the lifetime of the process.
+    Tickers where both fields are unavailable receive the average cap of the
+    others.  If ALL fetches fail, falls back to equal weights.
+    """
+    caps = []
+    for t in tickers:
+        if t in _MARKET_CAP_CACHE:
+            caps.append(_MARKET_CAP_CACHE[t])
+            continue
+        try:
+            info = yf.Ticker(t).info
+            cap = float(info.get("marketCap") or info.get("totalAssets") or 0.0)
+        except Exception:
+            cap = 0.0
+        _MARKET_CAP_CACHE[t] = cap
+        caps.append(cap)
+
+    caps_arr = np.array(caps, dtype=float)
+    total = caps_arr.sum()
+
+    if total <= 0:
+        print("  [BL] Could not fetch any market caps — falling back to equal weights")
+        return np.ones(len(tickers)) / len(tickers)
+
+    # Assign average cap to tickers where the fetch failed (cap == 0)
+    n_missing = int((caps_arr == 0).sum())
+    if n_missing:
+        avg = total / (len(tickers) - n_missing)
+        caps_arr[caps_arr == 0] = avg
+
+    w = caps_arr / caps_arr.sum()
+    print(
+        f"  [BL] Market-cap weights — top 3: "
+        + ", ".join(
+            f"{tickers[i]}={w[i]:.1%}"
+            for i in np.argsort(w)[::-1][:3]
+        )
+    )
+    return w
+
+
+def _black_litterman_mu(Q: np.ndarray, rf: float, tickers: list[str]) -> np.ndarray:
     """
     Black-Litterman expected returns with no explicit views (pure market equilibrium prior).
 
     Formula: μ_BL = λ · Q · w_mkt + rf
     where:
       λ     = market risk-aversion, calibrated from SPY: (μ_SPY - rf) / σ²_SPY
-      w_mkt = equal-weight market portfolio (1/n per asset)
+      w_mkt = market-cap-weighted portfolio (marketCap for stocks, AUM for ETFs)
       Q     = annualised covariance matrix of the selected assets
 
-    With no views this is equivalent to CAPM-implied returns. The key advantage
-    over raw historical means is stability: historical μ is extremely noisy
-    (the 'error-maximisation' problem in Markowitz) while BL equilibrium returns
-    are smooth and produce better-diversified optimal portfolios.
+    Using market-cap weights (rather than equal weights) produces implied returns
+    that reflect actual market sentiment — large-cap assets receive appropriately
+    calibrated expected returns, and the optimizer can meaningfully differentiate
+    between assets rather than treating all high-volatility assets identically.
     """
-    n = Q.shape[0]
-    w_mkt = np.ones(n) / n  # equal-weight market portfolio
+    # Market-cap weights (the correct BL market portfolio)
+    w_mkt = _get_market_weights(tickers)
 
     # Calibrate λ from SPY historical data (already in the local price cache)
     from ai_advisor.price_cache import load_prices
@@ -373,7 +426,7 @@ class PortfolioOptimizer:
         # Expected returns via Black-Litterman (no views — pure market equilibrium
         # prior). This replaces raw historical means, which are extremely noisy
         # and tend to concentrate weight in recent high-performers.
-        self.mu = _black_litterman_mu(self.Q, self.rf)
+        self.mu = _black_litterman_mu(self.Q, self.rf, self.tickers)
 
     # ── Simple strategies ───────────────────────────────────────
 
