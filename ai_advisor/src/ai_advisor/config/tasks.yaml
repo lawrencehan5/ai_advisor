@@ -72,31 +72,18 @@ assess_risk_task:
     {available_strategies}
 
     Match the optimization strategy to the user's profile:
-<<<<<<< HEAD
-    - Conservative users → minimum_variance
-    - Moderate users → equal_risk_contribution
-    - Balanced users → robust_mean_variance
-    - Growth users → market_tracking or equally_weighted
-    - Aggressive/experienced users → max_sharpe_ratio, max_expected_return, or leveraged_max_sharpe
-=======
     - Conservative/low-experience users → minimum_variance or equally_weighted
     - Moderate users → equal_risk_contribution or robust_mean_variance
     - Balanced users → max_sharpe_ratio or robust_mean_variance
     - Growth users → max_sharpe_ratio or max_expected_return
     - Aggressive/experienced users → leveraged_max_sharpe or max_expected_return
->>>>>>> befa681 (imporoved selection strategy)
 
     Additionally, apply these hard rules:
     - If investment_style is passive → strongly prefer market_tracking or minimum_variance.
     - If investment_style is active → prefer max_expected_return or max_sharpe_ratio.
     - If leverage_comfort is "no" → NEVER recommend leveraged_max_sharpe.
-<<<<<<< HEAD
     - If experience is None or Beginner → avoid leveraged_max_sharpe, max_expected_return, and max_sharpe_ratio.
     - If investment_horizon is less than 3 years → prefer minimum_variance or equal_risk_contribution.
-=======
-    - If experience is None or Beginner → avoid leveraged_max_sharpe and max_expected_return.
-    - If investment_horizon is less than 3 years → prefer minimum_variance or equally_weighted.
->>>>>>> befa681 (imporoved selection strategy)
   expected_output: >
     RISK ASSESSMENT
     ===============
