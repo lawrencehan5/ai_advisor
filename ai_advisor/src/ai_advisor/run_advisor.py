@@ -532,7 +532,7 @@ def run_initial_pipeline(
     print()
 
     progress(f"Optimizing portfolio weights ({strategy.replace('_', ' ')})")
-    opt_result = run_optimization(strategy, tickers, investment_amount, max_weight=max_weight)
+    opt_result = run_optimization(strategy, tickers, investment_amount, max_weight=max_weight, investment_horizon=investment_horizon)
 
     # ── Phase 3: Present results with FULL context ──────────────
     progress("Preparing your personalized recommendation")

@@ -581,6 +581,7 @@ def run_optimization(
     tickers: list[str],
     investment_amount: float = 10000.0,
     max_weight: float = 1.0,
+    investment_horizon: str = "5-10yr",
 ) -> OptimizationResult:
     """
     Fetch price data, build a PortfolioOptimizer, run the requested strategy,
@@ -637,7 +638,7 @@ def run_optimization(
         expected_return=exp_ret,
         expected_volatility=exp_vol,
         sharpe_ratio=sharpe,
-        metadata={"risk_free_rate": opt.rf, "n_assets": len(final_tickers), "investment_amount": investment_amount, "max_weight": max_weight},
+        metadata={"risk_free_rate": opt.rf, "n_assets": len(final_tickers), "investment_amount": investment_amount, "max_weight": max_weight, "investment_horizon": investment_horizon},
     )
 
 
