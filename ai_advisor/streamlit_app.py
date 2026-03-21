@@ -285,6 +285,7 @@ st.markdown("""
         font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase;
         color: var(--accent-gold); border: 1px solid rgba(201,162,78,0.45);
         border-radius: 20px; padding: 0.3rem 1rem; margin-bottom: 0.7rem;
+        white-space: nowrap;
     }
     .landing-title {
         font-size: 2.75rem; font-weight: 700; line-height: 1.1; margin: 0 0 0.6rem 0;
@@ -376,7 +377,7 @@ st.markdown("""
         display: flex; gap: 0; align-items: center;
         width: 100%;
     }
-    .hero-left { flex: 0 0 60%; padding-left: 3.0rem; padding-right: 5rem; padding-top: 9vh; }
+    .hero-left { flex: 0 0 60%; padding-left: 3rem; padding-right: 5rem; padding-top: 9vh; }
     .hero-right {
         flex: 0 0 40%; position: relative;
         overflow: hidden; min-height: 280px;
