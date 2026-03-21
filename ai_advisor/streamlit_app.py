@@ -53,7 +53,7 @@ st.markdown("""
         :root { --text-secondary: #475569; }
     }
 
-    .stApp { font-family: 'DM Sans', sans-serif; }
+    .stApp { font-family: 'DM Sans', sans-serif; overflow-x: hidden; }
     #MainMenu, header, footer, .stDeployButton { display: none !important; }
     .block-container { padding-top: 1rem !important; }
     /* Prevent animated scroll so rerun scroll-jumps are instant, not a sweep */
@@ -95,6 +95,11 @@ st.markdown("""
     /* User avatar */
     [data-testid="stChatMessageAvatarUser"] {
         background-color: #22c55e !important;
+        color: #fff !important;
+    }
+    /* AI avatar */
+    [data-testid="stChatMessageAvatarAssistant"] {
+        background-color: var(--accent-gold) !important;
         color: #fff !important;
     }
 
@@ -350,6 +355,7 @@ st.markdown("""
         min-height: 400px;
         display: flex;
         align-items: flex-start;
+        overflow: hidden;
     }
     .hero-section::before {
         content: '';
@@ -370,7 +376,7 @@ st.markdown("""
         display: flex; gap: 0; align-items: center;
         width: 100%;
     }
-    .hero-left { flex: 0 0 60%; padding-right: 5rem; padding-top: 9vh; }
+    .hero-left { flex: 0 0 60%; padding-left: 1.5rem; padding-right: 5rem; padding-top: 9vh; }
     .hero-right {
         flex: 0 0 40%; position: relative;
         overflow: hidden; min-height: 280px;
@@ -404,6 +410,7 @@ st.markdown("""
     .landing-stats-dark {
         position: relative;
         padding: 2.75rem 0;
+        overflow: hidden;
     }
     .landing-stats-dark::before {
         content: '';
@@ -415,6 +422,99 @@ st.markdown("""
     .landing-stats-dark .stats-bar { position: relative; z-index: 1; margin: 0; }
     .landing-stats-dark .stat-label { color: #9ca3af !important; }
     .landing-stats-dark .stat-value { font-size: 1.8rem; }
+
+    /* ── Mobile responsive overrides (≤640 px) ── */
+    @media (max-width: 640px) {
+        /* Hero: stack vertically, hide decorative SVG */
+        .hero-inner { flex-direction: column !important; }
+        .hero-right { display: none !important; }
+        .hero-left {
+            flex: 0 0 100% !important;
+            padding-left: 1.25rem !important;
+            padding-right: 1.25rem !important;
+            padding-top: 4vh !important;
+            padding-bottom: 2rem !important;
+        }
+        .hero-section::before { right: 0 !important; }
+        .hero-section::after { display: none !important; }
+        .hero-section { min-height: auto !important; }
+        .landing-title { font-size: 2rem !important; }
+        /* Remove inline <br> breaks that cause awkward wrapping */
+        .landing-sub br { display: none !important; }
+
+        /* Stats bar: collapse into 2×2 grid */
+        .stats-bar { flex-wrap: wrap !important; gap: 0 !important; }
+        .stat-item { flex: 1 1 50% !important; padding: 0.75rem 0 !important; }
+        .stat-item + .stat-item { border-left: none !important; }
+        .stat-item:nth-child(2) { border-left: 1px solid var(--border-color) !important; }
+        .stat-item:nth-child(n+3) { border-top: 1px solid rgba(128,128,128,0.18) !important; }
+        .landing-stats-dark { padding: 1.5rem 0 !important; }
+
+        /* Steps: single column */
+        .steps-grid { grid-template-columns: 1fr !important; }
+
+        /* Strategies: 2-column */
+        .strategies-grid { grid-template-columns: 1fr 1fr !important; }
+
+        /* Portfolio card: smaller metric items */
+        .pm-item { min-width: 70px !important; }
+        .portfolio-card { padding: 1rem !important; }
+
+        /* Alloc table: hide progress bar — 5 items in a row is too crowded */
+        .at-bar-container { display: none !important; }
+        .at-pct { min-width: 36px !important; }
+        .at-dollars { min-width: 46px !important; margin-left: 0.25rem !important; }
+        .at-units { min-width: 46px !important; }
+        .at-ticker { font-size: 0.78rem !important; }
+
+        /* Streamlit columns (charts side-by-side → stack vertically) */
+        [data-testid="stHorizontalBlock"] { flex-direction: column !important; }
+        [data-testid="stColumn"] {
+            width: 100% !important;
+            flex: 1 1 100% !important;
+            min-width: 100% !important;
+        }
+
+        /* Reduce block-container padding */
+        .block-container {
+            padding-left: 0.75rem !important;
+            padding-right: 0.75rem !important;
+        }
+        body:has(#chat-mode) .block-container {
+            padding-left: 0.75rem !important;
+            padding-right: 0.75rem !important;
+        }
+        body:has(#chat-mode) [data-testid="stBottomBlockContainer"] {
+            padding-left: 0.75rem !important;
+            padding-right: 0.75rem !important;
+        }
+
+        /* User chat bubble: allow slightly wider */
+        [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) [data-testid="stChatMessageContent"] {
+            max-width: 92% !important;
+        }
+
+        /* Brand bar: shrink text */
+        .brand-bar { font-size: 0.65rem !important; letter-spacing: 0.08em !important; }
+
+        /* Survey option buttons: full height touch targets */
+        .stButton > button { padding: 0.6rem 0.9rem !important; }
+
+        /* Brand bar: hide tagline, show logo/name only */
+        .brand-tagline { display: none !important; }
+    }
+
+    /* ── Tablet overrides (641 px – 900 px) ── */
+    @media (min-width: 641px) and (max-width: 900px) {
+        .steps-grid { grid-template-columns: 1fr 1fr !important; }
+        .strategies-grid { grid-template-columns: 1fr 1fr !important; }
+        .hero-left { padding-right: 2.5rem !important; }
+        .landing-title { font-size: 2.2rem !important; }
+        .at-bar-container { display: none !important; }
+        .at-pct { min-width: 38px !important; }
+        .at-dollars { min-width: 52px !important; }
+        .at-units { min-width: 52px !important; }
+    }
 
 </style>
 """, unsafe_allow_html=True)
@@ -712,7 +812,7 @@ def brand():
         '<div class="brand-bar">'
         f'<span style="display:inline-flex;align-items:flex-end;gap:0.5em;">'
         f'{brand_html}'
-        f'<span> | Intelligent Portfolio Management</span>'
+        f'<span class="brand-tagline"> | Intelligent Portfolio Management</span>'
         f'</span>'
         '</div>',
         unsafe_allow_html=True,
