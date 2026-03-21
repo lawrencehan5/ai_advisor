@@ -350,6 +350,7 @@ st.markdown("""
         min-height: 400px;
         display: flex;
         align-items: flex-start;
+        overflow: hidden;
     }
     .hero-section::before {
         content: '';
@@ -404,6 +405,7 @@ st.markdown("""
     .landing-stats-dark {
         position: relative;
         padding: 2.75rem 0;
+        overflow: hidden;
     }
     .landing-stats-dark::before {
         content: '';
@@ -802,7 +804,7 @@ def brand():
         brand_html = '<span class="brand-name">Your Robo-Advisor</span>'
     st.markdown(
         '<div class="brand-bar">'
-        f'<span style="display:inline-flex;align-items:center;gap:0.5em;">'
+        f'<span style="display:inline-flex;align-items:flex-end;gap:0.5em;">'
         f'{brand_html}'
         f'<span class="brand-tagline"> | Intelligent Portfolio Management</span>'
         f'</span>'
