@@ -10,6 +10,7 @@ import base64
 import time
 import numpy as np
 from pathlib import Path
+import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
@@ -224,6 +225,16 @@ st.markdown("""
         font-family: 'JetBrains Mono', monospace;
         font-size: 0.8rem; color: var(--accent-gold); min-width: 45px; text-align: right;
     }
+    .at-dollars {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.75rem; color: var(--text-secondary);
+        min-width: 58px; text-align: right; margin-left: 0.5rem;
+    }
+    .at-units {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.75rem; color: var(--text-muted);
+        min-width: 62px; text-align: right;
+    }
 
     /* Typing indicator */
     .typing-dot {
@@ -405,6 +416,95 @@ st.markdown("""
     .landing-stats-dark .stat-label { color: #9ca3af !important; }
     .landing-stats-dark .stat-value { font-size: 1.8rem; }
 
+    /* ── Mobile responsive overrides (≤640 px) ── */
+    @media (max-width: 640px) {
+        /* Hero: stack vertically, hide decorative SVG */
+        .hero-inner { flex-direction: column !important; }
+        .hero-right { display: none !important; }
+        .hero-left {
+            flex: 0 0 100% !important;
+            padding-right: 1.25rem !important;
+            padding-top: 4vh !important;
+            padding-bottom: 2rem !important;
+        }
+        .hero-section::before { right: 0 !important; }
+        .hero-section::after { display: none !important; }
+        .hero-section { min-height: auto !important; }
+        .landing-title { font-size: 2rem !important; }
+        /* Remove inline <br> breaks that cause awkward wrapping */
+        .landing-sub br { display: none !important; }
+
+        /* Stats bar: collapse into 2×2 grid */
+        .stats-bar { flex-wrap: wrap !important; gap: 0 !important; }
+        .stat-item { flex: 1 1 50% !important; padding: 0.75rem 0 !important; }
+        .stat-item + .stat-item { border-left: none !important; }
+        .stat-item:nth-child(2) { border-left: 1px solid var(--border-color) !important; }
+        .stat-item:nth-child(n+3) { border-top: 1px solid rgba(128,128,128,0.18) !important; }
+        .landing-stats-dark { padding: 1.5rem 0 !important; }
+
+        /* Steps: single column */
+        .steps-grid { grid-template-columns: 1fr !important; }
+
+        /* Strategies: 2-column */
+        .strategies-grid { grid-template-columns: 1fr 1fr !important; }
+
+        /* Portfolio card: smaller metric items */
+        .pm-item { min-width: 70px !important; }
+        .portfolio-card { padding: 1rem !important; }
+
+        /* Alloc table: hide progress bar — 5 items in a row is too crowded */
+        .at-bar-container { display: none !important; }
+        .at-pct { min-width: 36px !important; }
+        .at-dollars { min-width: 46px !important; margin-left: 0.25rem !important; }
+        .at-units { min-width: 46px !important; }
+        .at-ticker { font-size: 0.78rem !important; }
+
+        /* Streamlit columns (charts side-by-side → stack vertically) */
+        [data-testid="stHorizontalBlock"] { flex-direction: column !important; }
+        [data-testid="stColumn"] {
+            width: 100% !important;
+            flex: 1 1 100% !important;
+            min-width: 100% !important;
+        }
+
+        /* Reduce block-container padding */
+        .block-container {
+            padding-left: 0.75rem !important;
+            padding-right: 0.75rem !important;
+        }
+        body:has(#chat-mode) .block-container {
+            padding-left: 0.75rem !important;
+            padding-right: 0.75rem !important;
+        }
+        body:has(#chat-mode) [data-testid="stBottomBlockContainer"] {
+            padding-left: 0.75rem !important;
+            padding-right: 0.75rem !important;
+        }
+
+        /* User chat bubble: allow slightly wider */
+        [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) [data-testid="stChatMessageContent"] {
+            max-width: 92% !important;
+        }
+
+        /* Brand bar: shrink text */
+        .brand-bar { font-size: 0.65rem !important; letter-spacing: 0.08em !important; }
+
+        /* Survey option buttons: full height touch targets */
+        .stButton > button { padding: 0.6rem 0.9rem !important; }
+    }
+
+    /* ── Tablet overrides (641 px – 900 px) ── */
+    @media (min-width: 641px) and (max-width: 900px) {
+        .steps-grid { grid-template-columns: 1fr 1fr !important; }
+        .strategies-grid { grid-template-columns: 1fr 1fr !important; }
+        .hero-left { padding-right: 2.5rem !important; }
+        .landing-title { font-size: 2.2rem !important; }
+        .at-bar-container { display: none !important; }
+        .at-pct { min-width: 38px !important; }
+        .at-dollars { min-width: 52px !important; }
+        .at-units { min-width: 52px !important; }
+    }
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -496,6 +596,10 @@ QUESTIONS = [
         "message": "Could you briefly describe what those debts are?",
         "type": "freetext",
         "hint": "e.g. $20k student loan at 5%, $3k credit card — or type 'none'",
+        "skip_if": lambda ans: ans.get("total_debt", "").strip().lower() in {
+            "0", "$0", "0.00", "$0.00", "none", "no debt", "n/a", "nil", "zero",
+        },
+        "skip_value": "none",
     },
     {
         "key": "experience_level",
@@ -604,6 +708,41 @@ QUESTIONS = [
         ],
     },
     {
+        "key": "num_stocks",
+        "message": "How many holdings would you like in your portfolio?",
+        "type": "options",
+        "options": [
+            "5 or fewer — concentrated, high-conviction",
+            "6–10 — moderately diversified",
+            "11–15 — well diversified",
+            "16–20 — broadly diversified",
+            "20+ — maximum diversification",
+        ],
+    },
+    {
+        "key": "sector_diversification",
+        "message": "Would you like your portfolio spread across different industries and sectors?",
+        "type": "options",
+        "options": [
+            "Yes — spread across as many sectors as possible",
+            "Somewhat — some sector diversity, but don't force it",
+            "No preference — let the optimizer decide",
+            "No — concentrate in a few sectors I believe in",
+        ],
+    },
+    {
+        "key": "investment_objective",
+        "message": "What is your primary investment objective?",
+        "type": "options",
+        "options": [
+            "Protect capital — prioritize safety, accept lower returns",
+            "Track the market — match S&P 500 performance reliably",
+            "Balance growth and risk — optimize risk-adjusted returns",
+            "Maximize returns — willing to accept higher volatility",
+            "Steady income — dividends and regular cash flow",
+        ],
+    },
+    {
         "key": "special_considerations",
         "message": "Last question — anything else I should know? Any stock that you like or dislike? ESG preferences, upcoming big expenses, tax situations, constraints?",
         "type": "freetext",
@@ -634,6 +773,9 @@ SURVEY_LABELS = {
     "loss_tolerance": "Maximum Tolerable Annual Loss",
     "investment_style": "Investment Style",
     "leverage_comfort": "Leverage Comfort",
+    "num_stocks": "Preferred Number of Holdings",
+    "sector_diversification": "Sector Diversification Preference",
+    "investment_objective": "Primary Investment Objective",
     "special_considerations": "Special Considerations",
 }
 
@@ -844,6 +986,91 @@ def _make_monte_carlo(
     return fig
 
 
+def _make_backtest_chart(allocations: list[dict], investment_amount: float) -> go.Figure:
+    """
+    Show how the selected portfolio would have performed over the last 3 years
+    vs the SPY benchmark, using a buy-and-hold assumption from the first
+    available date in the cache.
+    """
+    from ai_advisor.price_cache import load_prices
+    from datetime import date, timedelta
+
+    tickers = [a["ticker"] for a in allocations]
+    weights = {a["ticker"]: a["weight"] for a in allocations}
+
+    prices = load_prices(tickers + ["SPY"])
+    start_3y = date.today() - timedelta(days=3 * 365)
+    prices = prices[prices.index >= pd.Timestamp(start_3y)]
+
+    if prices.empty or len(prices) < 2:
+        return go.Figure()
+
+    available = [t for t in tickers if t in prices.columns and prices[t].notna().any()]
+    if not available:
+        return go.Figure()
+
+    total_w = sum(weights[t] for t in available)
+    w = {t: weights[t] / total_w for t in available}
+
+    # Buy-and-hold: position value = (dollars_allocated / start_price) * price(t)
+    first_prices = prices[available].bfill().iloc[0]
+    position_values = pd.DataFrame({
+        t: (w[t] * investment_amount / first_prices[t]) * prices[t]
+        for t in available
+    })
+    port_value = position_values.sum(axis=1).dropna()
+
+    spy_prices = prices["SPY"].dropna() if "SPY" in prices.columns else None
+    spy_value = None
+    if spy_prices is not None and not spy_prices.empty:
+        spy_value = investment_amount * spy_prices / spy_prices.bfill().iloc[0]
+
+    accent    = "201, 162, 78"   # gold
+    spy_color = "100, 116, 139"  # slate
+    fig = go.Figure()
+
+    if spy_value is not None:
+        fig.add_trace(go.Scatter(
+            x=spy_value.index, y=spy_value.values,
+            name="SPY (benchmark)",
+            line=dict(color=f"rgb({spy_color})", width=1.5, dash="dot"),
+        ))
+
+    fig.add_trace(go.Scatter(
+        x=port_value.index, y=port_value.values,
+        name="Your Portfolio",
+        line=dict(color=f"rgb({accent})", width=2.5),
+        fill="tozeroy",
+        fillcolor=f"rgba({accent},0.08)",
+    ))
+
+    fig.add_hline(
+        y=investment_amount, line_dash="dot",
+        line_color="gray", opacity=0.4,
+        annotation_text=f"  Initial ${investment_amount:,.0f}",
+        annotation_position="bottom right",
+    )
+
+    total_ret = (port_value.iloc[-1] - investment_amount) / investment_amount
+    fig.update_layout(
+        title=dict(
+            text=f"3-Year Historical Backtest — {total_ret:+.1%} total return",
+            font=dict(size=16),
+        ),
+        xaxis_title="Date",
+        yaxis_title="Portfolio Value ($)",
+        yaxis_tickformat="$,.0f",
+        height=400,
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        xaxis=dict(gridcolor="rgba(200,200,200,0.2)"),
+        yaxis=dict(gridcolor="rgba(200,200,200,0.2)"),
+        legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5),
+        margin=dict(l=10, r=10, t=60, b=60),
+    )
+    return fig
+
+
 def _render_charts(params: dict):
     col1, col2 = st.columns(2)
     with col1:
@@ -858,6 +1085,9 @@ def _render_charts(params: dict):
             ),
             width='stretch',
         )
+    backtest_fig = _make_backtest_chart(params["allocations"], params["investment_amount"])
+    if backtest_fig.data:
+        st.plotly_chart(backtest_fig, width='stretch')
 
 
 def build_portfolio_card(result: AdvisorResult) -> str:
@@ -891,11 +1121,25 @@ def build_portfolio_card(result: AdvisorResult) -> str:
         </div>
     """
 
+    metrics += (
+        '<p style="font-size:0.7rem; color:#64748b; margin: 0.5rem 0 0.75rem 0; line-height:1.5;">'
+        "<b>Exp. Return</b>: annualized portfolio return estimated via Black-Litterman market "
+        "equilibrium — anchors to CAPM-implied returns rather than raw historical averages. "
+        "<b>Volatility</b>: annualized standard deviation — in a typical year, actual returns "
+        "land within roughly ±1\u00d7 volatility of the expected return (~68% of years). "
+        "The Monte Carlo chart uses these as inputs to geometric Brownian motion."
+        "</p>"
+    )
+
+    investment_amount = opt.metadata.get("investment_amount", 0.0)
     max_w = max((a["weight"] for a in result.allocations), default=1)
     rows = ""
     for a in result.allocations:
         pct = a["weight"] * 100
         bar_w = (a["weight"] / max_w) * 100
+        dollar_amt = a["weight"] * investment_amount
+        price = a.get("current_price", 0.0)
+        units = dollar_amt / price if price > 0 else 0.0
         rows += f"""
         <div class="alloc-table-row">
             <span class="at-ticker">{a["ticker"]}</span>
@@ -903,6 +1147,8 @@ def build_portfolio_card(result: AdvisorResult) -> str:
                 <div class="at-bar" style="width:{bar_w}%"></div>
             </div>
             <span class="at-pct">{pct:.1f}%</span>
+            <span class="at-dollars">${dollar_amt:,.0f}</span>
+            <span class="at-units">{units:.4g} sh</span>
         </div>"""
 
     metrics += f'<div class="alloc-table">{rows}</div></div>'
@@ -957,6 +1203,16 @@ def record_answer(value: str):
     if q["key"] == "total_debt" and _no_debt(value):
         st.session_state.answers["debt_details"] = "none"
         st.session_state.step += 1
+
+    # Auto-skip any questions whose skip_if condition is satisfied
+    while st.session_state.step < TOTAL:
+        next_q = QUESTIONS[st.session_state.step]
+        skip_if = next_q.get("skip_if")
+        if skip_if and skip_if(st.session_state.answers):
+            st.session_state.answers[next_q["key"]] = next_q.get("skip_value", "none")
+            st.session_state.step += 1
+        else:
+            break
 
     if st.session_state.step >= TOTAL:
         st.session_state.phase = "processing"

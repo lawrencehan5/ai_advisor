@@ -10,6 +10,8 @@ dependencies = [
     "plotly>=5.0",
     "scipy>=1.10",
     "cvxpy>=1.4",
+    "scipy>=1.10",
+    "cvxpy>=1.4",
 ]
 
 [project.scripts]

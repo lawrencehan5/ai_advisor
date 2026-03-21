@@ -80,7 +80,15 @@ def _extract_survey_data(survey_text: str) -> dict:
                     '{\n'
                     '  "investment_amount": <number in dollars, e.g. 100000 for "100k" or "a hundred thousand">,\n'
                     '  "excluded_tickers": [<list of ticker strings the user wants EXCLUDED>],\n'
-                    '  "included_tickers": [<list of ticker strings the user wants INCLUDED or prefers>]\n'
+                    '  "included_tickers": [<list of ticker strings the user wants INCLUDED or prefers>],\n'
+                    '  "num_stocks": <integer: target number of holdings — map "5 or fewer"→5, "6-10"→8, "11-15"→12, "16-20"→18, "20+"→25, default 12>,\n'
+                    '  "sector_diversified": <true if user wants broad sector diversity, false if they prefer concentration, null if no preference>,\n'
+                    '  "experience_level": "<one of: none, beginner, intermediate, advanced — map: none/never→none, beginner/little→beginner, intermediate/regularly→intermediate, advanced/actively→advanced>",\n'
+                    '  "investment_horizon": "<one of: <1yr, 1-3yr, 3-5yr, 5-10yr, 10-20yr, 20+yr — map from the horizon question answer>",\n'
+                    '  "investment_style": "<one of: passive, slightly_passive, neutral, slightly_active, active — map from passive/active preference answer>",\n'
+                    '  "leverage_comfort": "<one of: no, maybe, yes — map: No→no, Maybe/open to→maybe, Yes→yes>",\n'
+                    '  "existing_investments": <number in dollars, 0 if user has none or said none/no>,\n'
+                    '  "investment_objective": "<one of: protect_capital, track_market, balance, maximize_returns, income — map: Protect capital→protect_capital, Track the market→track_market, Balance growth→balance, Maximize returns→maximize_returns, Steady income→income, default balance>"\n'
                     '}\n\n'
                     "Rules:\n"
                     '- Convert ALL money formats to a plain number: "100k"→100000, "$50,000"→50000, '
@@ -88,7 +96,8 @@ def _extract_survey_data(survey_text: str) -> dict:
                     "- If user says exclude/remove/avoid/no/don't include a ticker, put it in excluded_tickers\n"
                     "- If user says include/prefer/want/must have a ticker, put it in included_tickers\n"
                     "- If no investment amount found, use 10000\n"
-                    "- If no exclusions/inclusions, use empty lists"
+                    "- If no exclusions/inclusions, use empty lists\n"
+                    "- For existing_investments: '401k worth $50k' → 50000; 'none', 'no', '0' → 0"
                 ),
             },
             {
@@ -109,9 +118,17 @@ def _extract_survey_data(survey_text: str) -> dict:
         data = {}
 
     return {
-        "investment_amount": float(data.get("investment_amount", 10000)),
-        "excluded_tickers": [t.upper() for t in data.get("excluded_tickers", [])],
-        "included_tickers": [t.upper() for t in data.get("included_tickers", [])],
+        "investment_amount":    float(data.get("investment_amount", 10000)),
+        "excluded_tickers":     [t.upper() for t in data.get("excluded_tickers", [])],
+        "included_tickers":     [t.upper() for t in data.get("included_tickers", [])],
+        "num_stocks":           int(data.get("num_stocks", 12)),
+        "sector_diversified":   data.get("sector_diversified", None),
+        "experience_level":     data.get("experience_level", "none"),
+        "investment_horizon":   data.get("investment_horizon", "3-5yr"),
+        "investment_style":     data.get("investment_style", "neutral"),
+        "leverage_comfort":     data.get("leverage_comfort", "no"),
+        "existing_investments": float(data.get("existing_investments", 0)),
+        "investment_objective": data.get("investment_objective", "balance"),
     }
 
 
@@ -174,6 +191,8 @@ def _select_tickers_with_ai(
     profile_text: str,
     risk_text: str,
     market_context: str = "",
+    num_stocks: int = 12,
+    sector_diversified: bool | None = None,
 ) -> list[str]:
     """
     Use GPT-4.1 to pick which tickers to include in the portfolio,
@@ -182,21 +201,30 @@ def _select_tickers_with_ai(
     """
     all_tickers = get_all_tickers()
 
+    # Build sector diversification instruction
+    if sector_diversified is True:
+        sector_rule = "- IMPORTANT: Spread picks across as many different sectors/industries as possible (tech, healthcare, finance, consumer, energy, utilities, industrials, etc.)"
+    elif sector_diversified is False:
+        sector_rule = "- The user prefers concentration over sector diversity — you may pick multiple tickers from the same sector if they are strong performers."
+    else:
+        sector_rule = "- Use reasonable sector diversification appropriate for the risk category."
+
     system_prompt = (
-        "You are a portfolio construction expert. Select 8-15 tickers "
+        f"You are a portfolio construction expert. Select EXACTLY {num_stocks} tickers "
         "from the approved universe for the user's portfolio.\n\n"
         f"APPROVED TICKERS: {', '.join(all_tickers)}\n\n"
         "Return ONLY a JSON array of ticker strings. No explanation, "
         "no markdown, no backticks. Example: [\"VOO\",\"BND\",\"AAPL\"]\n\n"
         "Rules:\n"
         "- NEVER include tickers the user asked to exclude\n"
-        "- Always include tickers the user asked to include\n"
+        "- Always include tickers the user asked to include (count them toward the target)\n"
+        f"- Select EXACTLY {num_stocks} tickers total\n"
         "- CONSERVATIVE: heavy bonds/fixed-income ETFs, defensive stocks\n"
         "- MODERATE: mix of bonds and broad equity ETFs\n"
         "- BALANCED: equal bonds and equities, some alternatives\n"
         "- GROWTH: equity-heavy, growth stocks, less bonds\n"
         "- AGGRESSIVE: mostly growth stocks and equity ETFs, minimal bonds\n"
-        "- Diversify across sectors\n"
+        f"{sector_rule}\n"
         "- USE the real-time market data below to inform your picks:\n"
         "  - Favor stocks/ETFs with positive recent momentum where appropriate\n"
         "  - Consider current valuations (P/E ratios)\n"
@@ -207,6 +235,7 @@ def _select_tickers_with_ai(
 
     user_prompt = (
         f"Risk Category: {risk_category}\n"
+        f"Target number of holdings: {num_stocks}\n"
         f"Excluded tickers: {excluded_tickers if excluded_tickers else 'none'}\n"
         f"Must-include tickers: {included_tickers if included_tickers else 'none'}\n\n"
         f"User Profile:\n{profile_text[:500]}\n\n"
@@ -390,12 +419,29 @@ def run_initial_pipeline(
     # ── Phase 0: Extract structured data from raw survey ────────
     progress("Reading your survey responses")
     survey_data = _extract_survey_data(survey_responses)
-    investment_amount = survey_data["investment_amount"]
-    excluded_tickers = survey_data["excluded_tickers"]
-    included_tickers = survey_data["included_tickers"]
+    investment_amount    = survey_data["investment_amount"]
+    excluded_tickers     = survey_data["excluded_tickers"]
+    included_tickers     = survey_data["included_tickers"]
+    num_stocks           = survey_data["num_stocks"]
+    sector_diversified   = survey_data["sector_diversified"]
+    experience_level     = survey_data["experience_level"]
+    investment_horizon   = survey_data["investment_horizon"]
+    investment_style     = survey_data["investment_style"]
+    leverage_comfort     = survey_data["leverage_comfort"]
+    existing_investments = survey_data["existing_investments"]
+    investment_objective = survey_data["investment_objective"]
+
+    # Derive per-asset max weight from target number of stocks:
+    # e.g. 5 stocks → 30% cap, 8 → 20%, 12 → 15%, 18 → 10%, 25 → 8%
+    max_weight = min(0.50, max(0.05, 1.5 / num_stocks))
 
     print(f"  Parsed: investment=${investment_amount:,.0f}, "
-          f"exclude={excluded_tickers}, include={included_tickers}")
+          f"exclude={excluded_tickers}, include={included_tickers}, "
+          f"num_stocks={num_stocks}, sector_diversified={sector_diversified}, "
+          f"max_weight={max_weight:.0%}, "
+          f"experience={experience_level}, horizon={investment_horizon}, "
+          f"style={investment_style}, leverage={leverage_comfort}, "
+          f"existing=${existing_investments:,.0f}, objective={investment_objective}")
 
     # ── Phase 0b: Fetch real-time market data ───────────────────
     progress("Fetching real-time stock prices and market news")
@@ -460,20 +506,33 @@ def run_initial_pipeline(
         profile_text=profile_text,
         risk_text=risk_text,
         market_context=market_context,
+        num_stocks=num_stocks,
+        sector_diversified=sector_diversified,
     )
 
-    strategy = select_strategy(risk_category, optimizer_strategy)
+    strategy = select_strategy(
+        risk_category,
+        optimizer_strategy,
+        experience_level=experience_level,
+        investment_horizon=investment_horizon,
+        investment_style=investment_style,
+        leverage_comfort=leverage_comfort,
+        existing_investments=existing_investments,
+        investment_amount=investment_amount,
+        investment_objective=investment_objective,
+    )
 
     print(f"  Risk Category: {risk_category}")
     print(f"  Optimizer Strategy: {strategy}")
     print(f"  Investment Amount: ${investment_amount:,.0f}")
+    print(f"  Target Holdings: {num_stocks} (max weight per asset: {max_weight:.0%})")
     print(f"  Selected Tickers ({len(tickers)}): {', '.join(tickers)}")
     if excluded_tickers:
         print(f"  Excluded: {', '.join(excluded_tickers)}")
     print()
 
     progress(f"Optimizing portfolio weights ({strategy.replace('_', ' ')})")
-    opt_result = run_optimization(strategy, tickers, investment_amount)
+    opt_result = run_optimization(strategy, tickers, investment_amount, max_weight=max_weight, investment_horizon=investment_horizon)
 
     # ── Phase 3: Present results with FULL context ──────────────
     progress("Preparing your personalized recommendation")

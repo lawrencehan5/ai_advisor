@@ -72,11 +72,11 @@ assess_risk_task:
     {available_strategies}
 
     Match the optimization strategy to the user's profile:
-    - Conservative users → minimum_variance
-    - Moderate users → equal_risk_contribution
-    - Balanced users → robust_mean_variance
-    - Growth users → market_tracking or equally_weighted
-    - Aggressive/experienced users → max_sharpe_ratio, max_expected_return, or leveraged_max_sharpe
+    - Conservative/low-experience users → minimum_variance or equally_weighted
+    - Moderate users → equal_risk_contribution or robust_mean_variance
+    - Balanced users → max_sharpe_ratio or robust_mean_variance
+    - Growth users → max_sharpe_ratio or max_expected_return
+    - Aggressive/experienced users → leveraged_max_sharpe or max_expected_return
 
     Additionally, apply these hard rules:
     - If investment_style is passive → strongly prefer market_tracking or minimum_variance.
