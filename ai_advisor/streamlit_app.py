@@ -376,7 +376,7 @@ st.markdown("""
         display: flex; gap: 0; align-items: center;
         width: 100%;
     }
-    .hero-left { flex: 0 0 60%; padding-left: 1.5rem; padding-right: 5rem; padding-top: 9vh; }
+    .hero-left { flex: 0 0 60%; padding-left: 3.0rem; padding-right: 5rem; padding-top: 9vh; }
     .hero-right {
         flex: 0 0 40%; position: relative;
         overflow: hidden; min-height: 280px;
