@@ -53,7 +53,7 @@ st.markdown("""
         :root { --text-secondary: #475569; }
     }
 
-    .stApp { font-family: 'DM Sans', sans-serif; }
+    .stApp { font-family: 'DM Sans', sans-serif; overflow-x: hidden; }
     #MainMenu, header, footer, .stDeployButton { display: none !important; }
     .block-container { padding-top: 1rem !important; }
     /* Prevent animated scroll so rerun scroll-jumps are instant, not a sweep */
@@ -491,6 +491,9 @@ st.markdown("""
 
         /* Survey option buttons: full height touch targets */
         .stButton > button { padding: 0.6rem 0.9rem !important; }
+
+        /* Brand bar: hide tagline, show logo/name only */
+        .brand-tagline { display: none !important; }
     }
 
     /* ── Tablet overrides (641 px – 900 px) ── */
@@ -799,9 +802,9 @@ def brand():
         brand_html = '<span class="brand-name">Your Robo-Advisor</span>'
     st.markdown(
         '<div class="brand-bar">'
-        f'<span style="display:inline-flex;align-items:flex-end;gap:0.5em;">'
+        f'<span style="display:inline-flex;align-items:center;gap:0.5em;">'
         f'{brand_html}'
-        f'<span> | Intelligent Portfolio Management</span>'
+        f'<span class="brand-tagline"> | Intelligent Portfolio Management</span>'
         f'</span>'
         '</div>',
         unsafe_allow_html=True,
