@@ -97,6 +97,11 @@ st.markdown("""
         background-color: #22c55e !important;
         color: #fff !important;
     }
+    /* AI avatar */
+    [data-testid="stChatMessageAvatarAssistant"] {
+        background-color: var(--accent-gold) !important;
+        color: #fff !important;
+    }
 
     /* Brand bar */
     .brand-bar {
@@ -371,7 +376,7 @@ st.markdown("""
         display: flex; gap: 0; align-items: center;
         width: 100%;
     }
-    .hero-left { flex: 0 0 60%; padding-right: 5rem; padding-top: 9vh; }
+    .hero-left { flex: 0 0 60%; padding-left: 1.5rem; padding-right: 5rem; padding-top: 9vh; }
     .hero-right {
         flex: 0 0 40%; position: relative;
         overflow: hidden; min-height: 280px;
@@ -425,6 +430,7 @@ st.markdown("""
         .hero-right { display: none !important; }
         .hero-left {
             flex: 0 0 100% !important;
+            padding-left: 1.25rem !important;
             padding-right: 1.25rem !important;
             padding-top: 4vh !important;
             padding-bottom: 2rem !important;
