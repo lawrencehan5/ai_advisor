@@ -593,7 +593,7 @@ QUESTIONS = [
     },
     {
         "key": "existing_investments",
-        "message": "Do you have any existing investments? If so, what's their approximate total value? (401k, IRA, brokerage, etc.)",
+        "message": "Do you have any existing investments? If so, what's their approximate total value? (TFSA, RRSP, 401k, IRA, brokerage, etc.)",
         "type": "freetext",
         "hint": "e.g. $10,000 or none",
     },
