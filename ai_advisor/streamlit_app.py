@@ -1149,22 +1149,12 @@ def build_portfolio_card(result: AdvisorResult) -> str:
 
     investment_amount = opt.metadata.get("investment_amount", 0.0)
     max_w = max((a["weight"] for a in result.allocations), default=1)
-
-    # Fetch latest closing prices to calculate share counts
-    from ai_advisor.price_cache import load_prices
-    tickers = [a["ticker"] for a in result.allocations]
-    try:
-        prices_df = load_prices(tickers)
-        latest_prices = prices_df.iloc[-1].to_dict() if not prices_df.empty else {}
-    except Exception:
-        latest_prices = {}
-
     rows = ""
     for a in result.allocations:
         pct = a["weight"] * 100
         bar_w = (a["weight"] / max_w) * 100
         dollar_amt = a["weight"] * investment_amount
-        price = a.get("current_price") or latest_prices.get(a["ticker"], 0.0)
+        price = a.get("current_price", 0.0)
         units = dollar_amt / price if price > 0 else 0.0
         rows += f"""
         <div class="alloc-table-row">
