@@ -1025,12 +1025,16 @@ def _make_backtest_chart(allocations: list[dict], investment_amount: float) -> g
     w = {t: weights[t] / total_w for t in available}
 
     # Buy-and-hold: position value = (dollars_allocated / start_price) * price(t)
-    first_prices = prices[available].bfill().iloc[0]
+    # Forward-fill then back-fill to handle sporadic missing dates (holidays,
+    # newly-listed assets, etc.) without creating false $0 spikes in the chart.
+    prices_filled = prices[available].ffill().bfill()
+    first_prices = prices_filled.iloc[0]
     position_values = pd.DataFrame({
-        t: (w[t] * investment_amount / first_prices[t]) * prices[t]
+        t: (w[t] * investment_amount / first_prices[t]) * prices_filled[t]
         for t in available
     })
-    port_value = position_values.sum(axis=1).dropna()
+    # min_count=1 ensures all-NaN rows produce NaN (not 0) so dropna removes them
+    port_value = position_values.sum(axis=1, min_count=1).dropna()
 
     spy_prices = prices["SPY"].dropna() if "SPY" in prices.columns else None
     spy_value = None
