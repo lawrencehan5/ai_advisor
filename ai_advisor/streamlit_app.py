@@ -1375,7 +1375,7 @@ def main():
         <div class="stat-label">strategies</div>
     </div>
     <div class="stat-item">
-        <div class="stat-value">50+</div>
+        <div class="stat-value">70</div>
         <div class="stat-label">securities</div>
     </div>
     <div class="stat-item">
