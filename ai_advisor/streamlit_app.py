@@ -1396,7 +1396,7 @@ def main():
     <div class="step-card">
         <div class="step-num">01</div>
         <div class="step-title">Complete your profile</div>
-        <div class="step-desc">22 questions covering income, goals, risk comfort, and investment preferences.</div>
+        <div class="step-desc">20+ questions covering income, goals, risk comfort, and investment preferences.</div>
     </div>
     <div class="step-card">
         <div class="step-num">02</div>
