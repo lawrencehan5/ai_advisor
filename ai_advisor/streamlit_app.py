@@ -1149,12 +1149,30 @@ def build_portfolio_card(result: AdvisorResult) -> str:
 
     investment_amount = opt.metadata.get("investment_amount", 0.0)
     max_w = max((a["weight"] for a in result.allocations), default=1)
+
+    # Fetch latest closing prices to calculate share counts.
+    # Use a 7-day lookback so we always hit the last trading day even on weekends.
+    import yfinance as yf
+    from datetime import date, timedelta
+    tickers = [a["ticker"] for a in result.allocations]
+    try:
+        end = date.today() + timedelta(days=1)
+        start = date.today() - timedelta(days=7)
+        raw = yf.download(tickers, start=start, end=end, auto_adjust=True, progress=False)
+        if not raw.empty:
+            close = raw["Close"] if isinstance(raw.columns, pd.MultiIndex) else raw[["Close"]].rename(columns={"Close": tickers[0]})
+            latest_prices = close.dropna(how="all").iloc[-1].to_dict()
+        else:
+            latest_prices = {}
+    except Exception:
+        latest_prices = {}
+
     rows = ""
     for a in result.allocations:
         pct = a["weight"] * 100
         bar_w = (a["weight"] / max_w) * 100
         dollar_amt = a["weight"] * investment_amount
-        price = a.get("current_price", 0.0)
+        price = a.get("current_price") or latest_prices.get(a["ticker"], 0.0)
         units = dollar_amt / price if price > 0 else 0.0
         rows += f"""
         <div class="alloc-table-row">
