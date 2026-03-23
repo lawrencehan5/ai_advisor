@@ -1367,7 +1367,7 @@ def main():
 <div class="landing-stats-dark">
 <div class="stats-bar">
     <div class="stat-item">
-        <div class="stat-value">22</div>
+        <div class="stat-value">20+</div>
         <div class="stat-label">questions</div>
     </div>
     <div class="stat-item">
