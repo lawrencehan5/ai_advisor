@@ -13,7 +13,6 @@ from pathlib import Path
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
-import streamlit.components.v1 as components
 from ai_advisor.run_advisor import run_initial_pipeline, run_followup_reoptimize, AdvisorResult
 
 # ── Page Config ─────────────────────────────────────────────────────────────
@@ -818,7 +817,7 @@ def brand():
         '</div>',
         unsafe_allow_html=True,
     )
-    components.html("""<script>
+    st.html("""<script>
 (function() {
     var doc = window.parent.document;
     function fitHero() {
@@ -831,12 +830,12 @@ def brand():
     fitHero();
     window.parent.addEventListener('resize', fitHero);
 })();
-</script>""", height=0)
+</script>""")
 
 
 def autofocus_input():
     """Inject JS to focus the chat input textarea after it renders."""
-    components.html("""
+    st.html("""
         <script>
             (function() {
                 var doc = window.parent.document;
@@ -857,7 +856,7 @@ def autofocus_input():
                 }
             })();
         </script>
-    """, height=0)
+    """)
 
 
 def typing_generator(text: str):
@@ -1273,7 +1272,7 @@ def main():
         # visible from the start (rerun resets scroll to top by default).
         # Multiple retries handle the async gap between Python execution and
         # the browser actually having painted the content.
-        components.html("""
+        st.html("""
             <script>
             (function() {
                 var doc = window.parent.document;
@@ -1288,7 +1287,7 @@ def main():
                 setTimeout(scrollBottom, 600);
             })();
             </script>
-        """, height=0)
+        """)
 
     brand()
 
@@ -1590,7 +1589,7 @@ def main():
                 record_answer(clicked_option)
                 st.rerun()
             else:
-                components.html("""
+                st.html("""
                     <script>
                         (function() {
                             var doc = window.parent.document;
@@ -1600,7 +1599,7 @@ def main():
                             if (el) el.scrollTop = el.scrollHeight;
                         })();
                     </script>
-                """, height=0)
+                """)
 
         else:
             hint = q.get("hint", "Type your answer...")
